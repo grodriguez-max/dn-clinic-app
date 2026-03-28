@@ -6,8 +6,8 @@
 
 @layer base {
   :root {
-    /* Light mode clínico — Cal.com / Notion aesthetic */
-    --background: 0 0% 99%;
+    /* Light mode — cool-tinted off-white base (como Vercel/Linear) */
+    --background: 220 16% 97%;
     --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
@@ -16,14 +16,14 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    /* Teal/cyan médico como color primario */
+    /* Teal primario */
     --primary: 173 80% 36%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 20% 96%;
+    --secondary: 220 16% 94%;
     --secondary-foreground: 222 47% 11%;
 
-    --muted: 210 20% 96%;
+    --muted: 220 16% 94%;
     --muted-foreground: 215 16% 47%;
 
     --accent: 173 80% 94%;
@@ -32,13 +32,13 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
     --ring: 173 80% 36%;
 
     --radius: 0.625rem;
 
-    /* Semantic colors */
+    /* Semantic */
     --color-success: 142 71% 45%;
     --color-warning: 38 92% 50%;
     --color-error: 0 84% 60%;
@@ -56,10 +56,10 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
-  /* Scrollbar estilizado */
+  /* Scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
@@ -71,105 +71,145 @@
     @apply bg-muted-foreground/30;
   }
 
-  /* Focus ring limpio */
   :focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
 @layer utilities {
-  /* Números en JetBrains Mono */
+  /* Números monoespaciados */
   .font-numeric {
     font-family: "JetBrains Mono", monospace;
     font-variant-numeric: tabular-nums;
   }
 
-  /* Card premium con sombra sutil */
+  /* Card premium — sombra multicapa como Stripe/Linear */
   .card-premium {
-    @apply bg-white border border-border rounded-xl shadow-sm;
+    @apply bg-white border border-border/60 rounded-xl;
     box-shadow:
-      0 1px 3px 0 rgb(0 0 0 / 0.04),
-      0 1px 2px -1px rgb(0 0 0 / 0.04);
+      0 0 0 1px rgb(0 0 0 / 0.03),
+      0 2px 4px -1px rgb(0 0 0 / 0.04),
+      0 8px 16px -4px rgb(0 0 0 / 0.06);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
   }
 
-  /* Hover elevación */
+  /* Hover lift — elevación suave */
   .hover-lift {
-    @apply transition-all duration-150 ease-out;
+    @apply transition-all duration-200 ease-out;
   }
   .hover-lift:hover {
-    @apply shadow-md;
-    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.04),
+      0 4px 8px -2px rgb(0 0 0 / 0.06),
+      0 16px 32px -8px rgb(0 0 0 / 0.10);
+    transform: translateY(-2px);
   }
 
-  /* Estado badge colors */
+  /* Stat card con borde izquierdo coloreado */
+  .stat-card {
+    @apply card-premium hover-lift cursor-default;
+  }
+
+  /* Glow teal — para elementos activos o destacados */
+  .glow-teal {
+    box-shadow:
+      0 0 0 1px hsl(173 80% 36% / 0.15),
+      0 4px 16px -4px hsl(173 80% 36% / 0.25);
+  }
+
+  /* Gradiente teal premium */
+  .gradient-teal {
+    background: linear-gradient(135deg, hsl(173 80% 36%) 0%, hsl(185 80% 32%) 100%);
+  }
+
+  /* Surface glassmorphism para header */
+  .glass-surface {
+    background: rgb(255 255 255 / 0.85);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border-bottom: 1px solid rgb(0 0 0 / 0.06);
+  }
+
+  /* Shine on hover — efecto reflejo en cards importantes */
+  .shine {
+    position: relative;
+    overflow: hidden;
+  }
+  .shine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 40%,
+      rgb(255 255 255 / 0.08) 50%,
+      transparent 60%
+    );
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+  }
+  .shine:hover::after {
+    transform: translateX(100%);
+  }
+
+  /* Status badges */
   .status-confirmed {
-    @apply bg-emerald-50 text-emerald-700 border-emerald-200;
+    @apply bg-emerald-50 text-emerald-700 border-emerald-200/80;
   }
   .status-pending {
-    @apply bg-amber-50 text-amber-700 border-amber-200;
+    @apply bg-amber-50 text-amber-700 border-amber-200/80;
   }
   .status-cancelled {
-    @apply bg-red-50 text-red-700 border-red-200;
+    @apply bg-red-50 text-red-700 border-red-200/80;
   }
   .status-no-show {
-    @apply bg-red-100 text-red-800 border-red-300;
+    @apply bg-red-100 text-red-800 border-red-300/80;
   }
   .status-completed {
-    @apply bg-slate-50 text-slate-600 border-slate-200;
+    @apply bg-slate-50 text-slate-600 border-slate-200/80;
+  }
+
+  /* Dot indicator animado */
+  .dot-live {
+    @apply w-2 h-2 rounded-full bg-emerald-500;
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.4);
+    animation: pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Fade in con micro-movimiento */
+  .animate-fade-up {
+    animation: fade-up 0.3s ease-out both;
   }
 }
 
-/* ── Print styles for PDF export ── */
+/* ── Keyframes ──────────────────────────────────────────────────────────────── */
+@keyframes pulse-live {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgb(16 185 129 / 0); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────── */
 @media print {
-  /* Hide navigation and controls */
-  aside,
-  header,
-  .no-print {
-    display: none !important;
-  }
-
-  /* Full-width main */
-  .lg\\:pl-60 {
-    padding-left: 0 !important;
-  }
-
-  main {
-    padding: 0 !important;
-  }
-
+  aside, header, .no-print { display: none !important; }
+  .lg\\:pl-60 { padding-left: 0 !important; }
+  main { padding: 0 !important; }
   body {
     background: white !important;
     color: black !important;
     font-size: 11px;
   }
-
-  /* Charts need explicit size for print */
-  .recharts-wrapper {
-    page-break-inside: avoid;
-  }
-
-  /* Tab content — show all tabs */
-  [role="tabpanel"][hidden] {
-    display: block !important;
-  }
-
-  [role="tablist"] {
-    display: none !important;
-  }
-
-  /* Cards */
-  .card-premium,
-  [class*="rounded"] {
+  .recharts-wrapper { page-break-inside: avoid; }
+  [role="tabpanel"][hidden] { display: block !important; }
+  [role="tablist"] { display: none !important; }
+  .card-premium, [class*="rounded"] {
     border: 1px solid #e5e7eb !important;
     box-shadow: none !important;
   }
-
-  /* Page breaks */
-  h2, h3 {
-    page-break-after: avoid;
-  }
-
-  .page-break {
-    page-break-before: always;
-  }
+  h2, h3 { page-break-after: avoid; }
+  .page-break { page-break-before: always; }
 }

@@ -84,12 +84,22 @@ const config: Config = {
           from: { opacity: "0", transform: "translateX(-8px)" },
           to: { opacity: "1", transform: "translateX(0)" },
         },
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "pulse-live": {
+          "0%, 100%": { boxShadow: "0 0 0 0 rgb(16 185 129 / 0.4)" },
+          "50%": { boxShadow: "0 0 0 6px rgb(16 185 129 / 0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.2s ease-out",
         "slide-in": "slide-in 0.2s ease-out",
+        "fade-up": "fade-up 0.3s ease-out both",
+        "pulse-live": "pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
     },
   },
