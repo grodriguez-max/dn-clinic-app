@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(ls node_modules/date-fns/tz*)",
+      "Bash(ls:*)",
+      "Bash(find /Users/gabrielrodriguez/projects/dn-clinic-app/app -name \"page.tsx\" -exec wc -l {} +)",
+      "Bash(head:*)",
+      "Bash(cat:*)",
+      "Bash(cat \"/Users/gabrielrodriguez/projects/dn-clinic-app/app/\\(dashboard\\)/agenda/page.tsx\")",
+      "Bash(wc:*)",
+      "Bash(ls /Users/gabrielrodriguez/projects/dn-clinic-app/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(ls /Users/gabrielrodriguez/projects/dn-clinic-app/app/\\\\\\(dashboard\\\\\\)/dashboard/)",
+      "Bash(cat /Users/gabrielrodriguez/projects/dn-clinic-app/app/\\\\\\(dashboard\\\\\\)/layout.tsx)",
+      "Bash(ls /Users/gabrielrodriguez/projects/dn-clinic-app/app/\\\\\\(auth\\\\\\)/)",
+      "Bash(node -e \"require\\(''stripe''\\); console.log\\(''stripe ok''\\)\")",
+      "Bash(node -e \"const s = require\\(''stripe''\\); console.log\\(''version:'', require\\(''./node_modules/stripe/package.json''\\).version\\)\")",
+      "Bash(SUPABASE_DB_PASSWORD='Bicicleta95@' NEXT_PUBLIC_SUPABASE_URL='https://ugqflfvoblcurdyocgtr.supabase.co' npx tsx scripts/apply-migration.ts supabase/migrations/20260328_billing.sql)",
+      "Bash(CONN=\"postgresql://postgres.ugqflfvoblcurdyocgtr:Bicicleta95%40@aws-0-us-east-1.pooler.supabase.com:5432/postgres\" npx tsx -e \":*)",
+      "Bash(pbcopy)",
+      "Bash(xargs sed:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}

@@ -1,0 +1,175 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode clínico — Cal.com / Notion aesthetic */
+    --background: 0 0% 99%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Teal/cyan médico como color primario */
+    --primary: 173 80% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 173 80% 94%;
+    --accent-foreground: 173 80% 25%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 173 80% 36%;
+
+    --radius: 0.625rem;
+
+    /* Semantic colors */
+    --color-success: 142 71% 45%;
+    --color-warning: 38 92% 50%;
+    --color-error: 0 84% 60%;
+    --color-info: 199 89% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Scrollbar estilizado */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+
+  /* Focus ring limpio */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  /* Números en JetBrains Mono */
+  .font-numeric {
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Card premium con sombra sutil */
+  .card-premium {
+    @apply bg-white border border-border rounded-xl shadow-sm;
+    box-shadow:
+      0 1px 3px 0 rgb(0 0 0 / 0.04),
+      0 1px 2px -1px rgb(0 0 0 / 0.04);
+  }
+
+  /* Hover elevación */
+  .hover-lift {
+    @apply transition-all duration-150 ease-out;
+  }
+  .hover-lift:hover {
+    @apply shadow-md;
+    transform: translateY(-1px);
+  }
+
+  /* Estado badge colors */
+  .status-confirmed {
+    @apply bg-emerald-50 text-emerald-700 border-emerald-200;
+  }
+  .status-pending {
+    @apply bg-amber-50 text-amber-700 border-amber-200;
+  }
+  .status-cancelled {
+    @apply bg-red-50 text-red-700 border-red-200;
+  }
+  .status-no-show {
+    @apply bg-red-100 text-red-800 border-red-300;
+  }
+  .status-completed {
+    @apply bg-slate-50 text-slate-600 border-slate-200;
+  }
+}
+
+/* ── Print styles for PDF export ── */
+@media print {
+  /* Hide navigation and controls */
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Full-width main */
+  .lg\\:pl-60 {
+    padding-left: 0 !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11px;
+  }
+
+  /* Charts need explicit size for print */
+  .recharts-wrapper {
+    page-break-inside: avoid;
+  }
+
+  /* Tab content — show all tabs */
+  [role="tabpanel"][hidden] {
+    display: block !important;
+  }
+
+  [role="tablist"] {
+    display: none !important;
+  }
+
+  /* Cards */
+  .card-premium,
+  [class*="rounded"] {
+    border: 1px solid #e5e7eb !important;
+    box-shadow: none !important;
+  }
+
+  /* Page breaks */
+  h2, h3 {
+    page-break-after: avoid;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+}

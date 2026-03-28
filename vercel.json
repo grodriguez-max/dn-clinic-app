@@ -1,0 +1,30 @@
+{
+  "framework": "nextjs",
+  "regions": ["iad1"],
+"functions": {
+    "app/api/agent/webhook/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/crons/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/crons/marketing/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/metrics/export/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/billing/webhook/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
+  ]
+}

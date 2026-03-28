@@ -1,0 +1,22 @@
+{
+  "name": "dn-clinic-workers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "whatsapp": "tsx whatsapp-server.ts",
+    "crons": "tsx cron-runner.ts"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.16",
+    "node-cron": "^3.0.3",
+    "qrcode-terminal": "^0.12.0",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.7.3"
+  }
+}
