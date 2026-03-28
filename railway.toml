@@ -1,7 +1,3 @@
-[build]
-builder = "NIXPACKS"
-buildCommand = "cd workers && npm ci"
-
 [deploy]
 startCommand = "cd workers && npx tsx cron-runner.ts"
 restartPolicyType = "ON_FAILURE"
