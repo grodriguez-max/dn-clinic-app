@@ -5,37 +5,51 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Calendar, Users, UserCheck, Scissors,
-  Bot, Megaphone, Receipt, Settings, Menu, X, LogOut, ChevronRight, BarChart3, CreditCard,
+  Bot, Megaphone, Receipt, Settings, Menu, X, LogOut, ChevronRight, BarChart3, CreditCard, Shield, Store, Package, Gift,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { logout } from "@/app/(auth)/actions"
 import { getInitials } from "@/lib/utils"
+import { can, type UserRole } from "@/lib/permissions"
+import { NotificationBell } from "./notification-bell"
 
-const navItems = [
-  { label: "Dashboard",    href: "/dashboard",     icon: LayoutDashboard },
-  { label: "Agenda",       href: "/agenda",         icon: Calendar },
-  { label: "Pacientes",    href: "/pacientes",      icon: Users },
-  { label: "Equipo",       href: "/equipo",         icon: UserCheck },
-  { label: "Servicios",    href: "/servicios",      icon: Scissors },
-  { label: "Agente IA",    href: "/agente",         icon: Bot },
-  { label: "Métricas",     href: "/metricas",       icon: BarChart3 },
-  { label: "Marketing",    href: "/marketing",      icon: Megaphone },
-  { label: "Facturacion",  href: "/facturacion",    icon: Receipt },
-  { label: "Suscripción",  href: "/billing",        icon: CreditCard },
-  { label: "Configuracion",href: "/configuracion",  icon: Settings },
+const ALL_NAV_ITEMS = [
+  { label: "Dashboard",    href: "/dashboard",     icon: LayoutDashboard, roles: null },
+  { label: "Agenda",       href: "/agenda",         icon: Calendar,        roles: null },
+  { label: "Pacientes",    href: "/pacientes",      icon: Users,           roles: null },
+  { label: "Equipo",       href: "/equipo",         icon: UserCheck,       roles: null },
+  { label: "Servicios",    href: "/servicios",      icon: Scissors,        roles: null },
+  { label: "Inventario",   href: "/inventario",     icon: Package,         roles: ["owner", "admin"] },
+  { label: "Gift Cards",   href: "/gift-cards",     icon: Gift,            roles: ["owner", "admin"] },
+  { label: "Agente IA",    href: "/agente",         icon: Bot,             roles: null },
+  { label: "Métricas",     href: "/metricas",       icon: BarChart3,       roles: null },
+  { label: "Marketing",    href: "/marketing",      icon: Megaphone,       roles: ["owner", "admin"] },
+  { label: "Facturación",  href: "/facturacion",    icon: Receipt,         roles: ["owner", "admin"] },
+  { label: "Caja",         href: "/caja",           icon: Store,           roles: ["owner", "admin"] },
+  { label: "Suscripción",  href: "/billing",        icon: CreditCard,      roles: ["owner"] },
+  { label: "Configuracion",href: "/configuracion",  icon: Settings,        roles: null },
 ]
+
+interface Branch { id: string; name: string; is_main?: boolean }
 
 interface AppShellProps {
   children: React.ReactNode
   user: { name: string; email: string; role: string; avatar_url?: string | null }
   clinicName: string
+  clinicId: string
+  branches?: Branch[]
 }
 
-export function AppShell({ children, user, clinicName }: AppShellProps) {
+export function AppShell({ children, user, clinicName, clinicId, branches = [] }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [selectedBranch, setSelectedBranch] = useState<string>("")
   const pathname = usePathname()
+
+  const navItems = ALL_NAV_ITEMS.filter((item) =>
+    !item.roles || item.roles.includes(user.role)
+  )
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -139,6 +153,21 @@ export function AppShell({ children, user, clinicName }: AppShellProps) {
             <Menu className="w-5 h-5" />
           </button>
           <PageTitle pathname={pathname} />
+          <div className="ml-auto flex items-center gap-2">
+            {branches.length > 1 && (
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                className="text-xs border border-border rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 max-w-[140px]"
+              >
+                <option value="">Todas las sucursales</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}{b.is_main ? " (Principal)" : ""}</option>
+                ))}
+              </select>
+            )}
+            <NotificationBell clinicId={clinicId} />
+          </div>
         </header>
 
         {/* Page content */}
@@ -161,8 +190,11 @@ function PageTitle({ pathname }: { pathname: string }) {
     "/metricas":      "Métricas",
     "/marketing":     "Marketing",
     "/facturacion":   "Facturación",
+    "/caja":          "Caja",
     "/billing":       "Suscripción",
     "/configuracion": "Configuración",
+    "/inventario":    "Inventario",
+    "/gift-cards":    "Gift Cards",
   }
   const base = "/" + pathname.split("/")[1]
   return (

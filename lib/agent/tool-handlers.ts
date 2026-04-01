@@ -7,6 +7,7 @@
 import { createServiceClient } from "@/lib/supabase/server"
 import { sendEscalationAlert, sendHotLeadAlert } from "@/lib/notifications/email"
 import { trackBillableAction } from "@/lib/billing/subscription"
+import { createNotification } from "@/lib/notifications/inapp"
 
 type ToolResult = Record<string, unknown>
 
@@ -138,6 +139,15 @@ export async function create_appointment(clinicId: string, input: {
   const { data: prof } = await supabase.from("professionals").select("name").eq("id", input.professional_id).single()
   const { data: patient } = await supabase.from("patients").select("name").eq("id", input.patient_id).single()
 
+  // In-app notification
+  void createNotification({
+    clinic_id: clinicId,
+    type: "new_appointment",
+    title: "Nueva cita agendada por el agente IA",
+    description: `${patient?.name ?? "Paciente"} — ${svc.name} el ${formatDate(startTime)} a las ${formatTime(startTime)}`,
+    link: "/agenda",
+  })
+
   return {
     ok: true,
     appointment_id: data.id,
@@ -174,6 +184,15 @@ export async function cancel_appointment(clinicId: string, input: {
   // Trigger waitlist check
   await check_waitlist_and_notify(clinicId, { appointment_id: input.appointment_id })
 
+  // In-app notification
+  void createNotification({
+    clinic_id: clinicId,
+    type: "cancelled_appointment",
+    title: "Cita cancelada por el paciente",
+    description: `${appt.patients?.name ?? "Paciente"} canceló la cita de ${appt.services?.name ?? "servicio"}`,
+    link: "/agenda",
+  })
+
   return { ok: true, message: "Cita cancelada correctamente." }
 }
 
@@ -206,6 +225,16 @@ export async function reschedule_appointment(clinicId: string, input: {
   if (error) return { error: error.message }
 
   const prof = appt.professionals as { name: string } | null
+
+  // In-app notification
+  void createNotification({
+    clinic_id: clinicId,
+    type: "reschedule_request",
+    title: "Cita reagendada por el paciente",
+    description: `${svc?.name ?? "Servicio"} — nueva fecha: ${formatDate(newStart)} a las ${formatTime(newStart)}`,
+    link: "/agenda",
+  })
+
   return {
     ok: true,
     message: `Cita reagendada para el ${formatDate(newStart)} a las ${formatTime(newStart)} con ${prof?.name ?? "el profesional"}.`,
@@ -447,6 +476,15 @@ export async function escalate_to_human(clinicId: string, input: {
     })
   }
 
+  // In-app notification for escalation
+  void createNotification({
+    clinic_id: clinicId,
+    type: "escalation",
+    title: `Escalación ${input.priority} — el agente necesita ayuda`,
+    description: input.reason,
+    link: "/agente",
+  })
+
   return {
     ok: true,
     escalated: true,
@@ -550,6 +588,15 @@ export async function rate_lead(clinicId: string, input: {
       type: "lead_caliente",
       message: `Lead caliente detectado: ${input.patient_phone}. ${input.notes ?? ""}`,
       patient_id: patient?.id,
+    })
+
+    // In-app notification
+    void createNotification({
+      clinic_id: clinicId,
+      type: "hot_lead",
+      title: "Lead caliente detectado",
+      description: `${input.patient_phone} preguntó por un servicio de alto valor. ${input.notes ?? ""}`,
+      link: "/pacientes",
     })
 
     // Email alert to owner

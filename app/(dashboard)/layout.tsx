@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
+import { createServiceClient } from "@/lib/supabase/server"
 import { AppShell } from "@/components/layout/app-shell"
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -16,14 +17,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!profile) redirect("/login")
 
-  const { data: clinic } = await supabase
-    .from("clinics")
-    .select("name, onboarding_completed")
-    .eq("id", profile.clinic_id)
-    .single()
-
-  // Redirect to onboarding if not completed yet
-  // (only for non-onboarding routes — handled by middleware later)
+  const service = createServiceClient()
+  const [clinicRes, branchesRes] = await Promise.all([
+    service.from("clinics").select("name, onboarding_completed").eq("id", profile.clinic_id).single(),
+    service.from("branches").select("id, name, is_main").eq("clinic_id", profile.clinic_id).order("is_main", { ascending: false }),
+  ])
 
   return (
     <AppShell
@@ -33,7 +31,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         role: profile.role,
         avatar_url: profile.avatar_url,
       }}
-      clinicName={clinic?.name ?? "Mi Clinica"}
+      clinicName={clinicRes.data?.name ?? "Mi Clinica"}
+      clinicId={profile.clinic_id}
+      branches={branchesRes.data ?? []}
     >
       {children}
     </AppShell>

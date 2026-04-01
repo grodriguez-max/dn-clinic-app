@@ -18,7 +18,7 @@ export default async function AgendaPage() {
   const clinicId = profile.clinic_id
 
   // Fetch reference data for dropdowns
-  const [profsResult, svcsResult, patientsResult] = await Promise.all([
+  const [profsResult, svcsResult, patientsResult, roomsResult] = await Promise.all([
     supabase
       .from("professionals")
       .select("id, name, specialty")
@@ -39,6 +39,13 @@ export default async function AgendaPage() {
       .eq("clinic_id", clinicId)
       .order("name")
       .limit(300),
+
+    supabase
+      .from("rooms")
+      .select("id, name, equipment")
+      .eq("clinic_id", clinicId)
+      .eq("is_active", true)
+      .order("name"),
   ])
 
   return (
@@ -48,6 +55,7 @@ export default async function AgendaPage() {
         professionals={profsResult.data ?? []}
         services={svcsResult.data ?? []}
         patients={patientsResult.data ?? []}
+        rooms={roomsResult.data ?? []}
       />
     </div>
   )

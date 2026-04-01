@@ -11,7 +11,7 @@ export default async function MetricasPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect("/login")
 
-  const { data: profile } = await supabase.from("users").select("clinic_id").eq("id", user.id).single()
+  const { data: profile } = await supabase.from("users").select("clinic_id, role").eq("id", user.id).single()
   if (!profile?.clinic_id) redirect("/login")
 
   const clinicId = profile.clinic_id
@@ -27,7 +27,7 @@ export default async function MetricasPage({
   }
   const since = (ranges[period] ?? ranges.month).toISOString()
 
-  const [apptsRes, patientsRes, invoicesRes, convsRes, profRes] = await Promise.all([
+  const [apptsRes, patientsRes, invoicesRes, convsRes, profRes, commissionsRes, pkgSalesRes, surveyRes] = await Promise.all([
     // All appointments in period
     supabase
       .from("appointments")
@@ -65,6 +65,27 @@ export default async function MetricasPage({
       .select("id, name")
       .eq("clinic_id", clinicId)
       .eq("is_active", true),
+
+    // Commissions in period
+    supabase
+      .from("commissions")
+      .select("id, professional_id, commission_amount, commission_percentage, status, created_at")
+      .eq("clinic_id", clinicId)
+      .gte("created_at", since),
+
+    // Package sales in period
+    supabase
+      .from("patient_packages")
+      .select("id, amount_paid, purchased_at, packages(name, price)")
+      .eq("clinic_id", clinicId)
+      .gte("purchased_at", since),
+
+    // Survey responses in period
+    supabase
+      .from("survey_responses")
+      .select("id, submitted_at, score, responses")
+      .eq("clinic_id", clinicId)
+      .gte("submitted_at", since),
   ])
 
   const appointments = apptsRes.data ?? []
@@ -72,6 +93,9 @@ export default async function MetricasPage({
   const invoices = invoicesRes.data ?? []
   const conversations = convsRes.data ?? []
   const professionals = profRes.data ?? []
+  const commissions = commissionsRes.data ?? []
+  const pkgSales = pkgSalesRes.data ?? []
+  const surveyResponses = surveyRes.data ?? []
 
   // ── Revenue metrics ──────────────────────────────────────────────────
   const totalRevenue = invoices.reduce((s, i) => s + Number(i.total), 0)
@@ -112,8 +136,8 @@ export default async function MetricasPage({
   }))
 
   // Appointments by hour (heatmap data)
-  const byHour = Array.from({ length: 13 }, (_, i) => {
-    const hour = i + 7 // 7am to 7pm
+  const byHour = Array.from({ length: 16 }, (_, i) => {
+    const hour = i + 7 // 7am to 10pm (22:00)
     return {
       hour: `${hour}:00`,
       Mon: appointments.filter((a) => { const d = new Date(a.start_time); return d.getDay() === 1 && d.getHours() === hour }).length,
@@ -155,11 +179,53 @@ export default async function MetricasPage({
   const agentConvs = conversations.length
   const agentEscalated = conversations.filter((c) => c.status === "escalated").length
   const agentResolved = conversations.filter((c) => c.status === "resolved").length
-  const agentBookings = appointments.filter((a) => a.created_by === "agent").length
+  const agentAppts = appointments.filter((a) => a.created_by === "agent")
+  const humanAppts = appointments.filter((a) => a.created_by !== "agent")
+  const agentBookings = agentAppts.length
   const escalationRate = agentConvs > 0 ? Math.round((agentEscalated / agentConvs) * 100) : 0
+
+  // Revenue attributed to agent (sum of prices of completed appointments created by agent)
+  const agentRevenue = agentAppts
+    .filter((a) => a.status === "completed")
+    .reduce((sum, a) => sum + ((a.services as { price?: number } | null)?.price ?? 0), 0)
+
+  // Appts by source: agent vs human (for bar chart)
+  const apptsBySource = [
+    { name: "Agente IA", value: agentBookings },
+    { name: "Manual", value: humanAppts.length },
+  ]
 
   // Daily agent conversations
   const dailyAgentConvs = buildDailySeries(conversations.map((c) => ({ date: c.started_at, value: 1 })), since)
+
+  // ── Commissions metrics ────────────────────────────────────────────────
+  const commissionsByPro = professionals.map((p) => {
+    const proComms = commissions.filter((c) => c.professional_id === p.id)
+    const total = proComms.reduce((s, c) => s + Number(c.commission_amount), 0)
+    const pending = proComms.filter((c) => c.status === "pending").reduce((s, c) => s + Number(c.commission_amount), 0)
+    return { name: p.name, total, pending, count: proComms.length }
+  }).sort((a, b) => b.total - a.total)
+
+  const totalCommissions = commissions.reduce((s, c) => s + Number(c.commission_amount), 0)
+
+  // ── Package metrics ────────────────────────────────────────────────────
+  const packageRevenue = pkgSales.reduce((s, p) => s + Number(p.amount_paid ?? (p.packages as any)?.price ?? 0), 0)
+  const packagesSold = pkgSales.length
+
+  // ── Survey / NPS metrics ───────────────────────────────────────────────
+  const avgScore = surveyResponses.length > 0
+    ? Math.round((surveyResponses.reduce((s, r) => s + Number(r.score ?? 0), 0) / surveyResponses.length) * 10) / 10
+    : 0
+  // NPS: promoters (score 5) - detractors (score ≤ 2) as % of total
+  const promoters = surveyResponses.filter((r) => Number(r.score ?? 0) >= 5).length
+  const detractors = surveyResponses.filter((r) => Number(r.score ?? 0) <= 2).length
+  const nps = surveyResponses.length > 0
+    ? Math.round(((promoters - detractors) / surveyResponses.length) * 100)
+    : 0
+  const scoreDistribution = [1, 2, 3, 4, 5].map((n) => ({
+    score: n.toString(),
+    count: surveyResponses.filter((r) => Number(r.score ?? 0) === n).length,
+  }))
 
   return (
     <MetricsClient
@@ -167,8 +233,21 @@ export default async function MetricasPage({
       revenue={{ total: totalRevenue, daily: dailyRevenue, byProfessional: revenueByPro, byCategory: revenueByCategory }}
       appointments={{ counts: apptCounts, byWeekday, byHour, daily: dailyAppts }}
       patients={{ new: newPatients, returning: returningPatients, retentionRate, bySource: patientsBySource, total: patients.length }}
-      agent={{ total: agentConvs, escalated: agentEscalated, resolved: agentResolved, bookings: agentBookings, escalationRate, daily: dailyAgentConvs }}
+      agent={{
+        total: agentConvs,
+        escalated: agentEscalated,
+        resolved: agentResolved,
+        bookings: agentBookings,
+        escalationRate,
+        daily: dailyAgentConvs,
+        agentRevenue,
+        apptsBySource,
+      }}
       professionals={professionals}
+      userRole={profile.role ?? "admin"}
+      commissions={{ total: totalCommissions, byProfessional: commissionsByPro }}
+      packages={{ sold: packagesSold, revenue: packageRevenue }}
+      surveys={{ total: surveyResponses.length, avgScore, nps, scoreDistribution }}
     />
   )
 }

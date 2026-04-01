@@ -4,7 +4,8 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Plus, Search, Pencil, Trash2, Phone, Mail, ExternalLink } from "lucide-react"
+import { Plus, Search, Pencil, Trash2, Phone, Mail, ExternalLink, TrendingUp } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { PatientModal, type PatientRow } from "./patient-modal"
 import { deletePatient } from "./actions"
@@ -117,7 +118,7 @@ export function PatientsClient({ clinicId, initialPatients }: Props) {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Paciente</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Contacto</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Etiquetas</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Fuente</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">LTV</th>
                 <th className="w-20 px-4 py-3" />
               </tr>
             </thead>
@@ -165,8 +166,16 @@ export function PatientsClient({ clinicId, initialPatients }: Props) {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground capitalize">
-                      {p.source ?? "—"}
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                          <TrendingUp className="w-3 h-3" />
+                          {formatCurrency((p as unknown as { total_spent?: number }).total_spent ?? 0)}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {(p as unknown as { total_visits?: number }).total_visits ?? 0} visitas
+                        </p>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 justify-end">

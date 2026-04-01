@@ -1,7 +1,16 @@
 "use server"
 
-import { createServiceClient } from "@/lib/supabase/server"
+import { createClient, createServiceClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { can } from "@/lib/permissions"
+
+async function getCallerRole(): Promise<string | null> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await supabase.from("users").select("role").eq("id", user.id).single()
+  return data?.role ?? null
+}
 
 export interface PatientInput {
   name: string
@@ -38,6 +47,9 @@ export async function updatePatient(id: string, input: PatientInput) {
 }
 
 export async function deletePatient(id: string) {
+  const role = await getCallerRole()
+  if (!can(role ?? "", "delete_patient")) return { error: "Sin permisos para eliminar pacientes" }
+
   const service = createServiceClient()
   const { error } = await service.from("patients").delete().eq("id", id)
   if (error) return { error: error.message }

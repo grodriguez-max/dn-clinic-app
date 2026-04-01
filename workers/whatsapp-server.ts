@@ -13,7 +13,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
 } from "@whiskeysockets/baileys"
 import { Boom } from "@hapi/boom"
-import * as qrcode from "qrcode-terminal"
+import qrcode from "qrcode-terminal"
 
 const WEBHOOK_URL = process.env.WHATSAPP_WEBHOOK_URL ?? "http://localhost:3000/api/agent/webhook"
 const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET ?? ""

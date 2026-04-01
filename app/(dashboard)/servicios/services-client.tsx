@@ -7,6 +7,8 @@ import { Plus, Pencil, Trash2, Clock, Tag } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ServiceModal, type ServiceRow } from "./service-modal"
 import { deleteService, toggleService } from "./actions"
+import { PackagesSection } from "./packages-section"
+import type { PackageRow } from "./package-modal"
 
 const CATEGORY_COLORS: Record<string, string> = {
   facial:       "bg-pink-100 text-pink-700",
@@ -22,9 +24,10 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface Props {
   clinicId: string
   initialServices: ServiceRow[]
+  initialPackages: PackageRow[]
 }
 
-export function ServicesClient({ clinicId, initialServices }: Props) {
+export function ServicesClient({ clinicId, initialServices, initialPackages }: Props) {
   const [services, setServices] = useState(initialServices)
   const [modal, setModal] = useState<{ open: boolean; service: ServiceRow | null }>({ open: false, service: null })
   const [, startTransition] = useTransition()
@@ -126,6 +129,15 @@ export function ServicesClient({ clinicId, initialServices }: Props) {
         clinicId={clinicId}
         service={modal.service}
       />
+
+      {/* ── Paquetes ─────────────────────────────── */}
+      <div className="pt-6 border-t border-border">
+        <PackagesSection
+          clinicId={clinicId}
+          initialPackages={initialPackages}
+          services={services.map((s) => ({ id: s.id, name: s.name, price: s.price }))}
+        />
+      </div>
     </div>
   )
 }

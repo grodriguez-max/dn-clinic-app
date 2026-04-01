@@ -112,7 +112,16 @@ cron.schedule("30 2 1 * *", () => triggerJob("billing_monthly"), { timezone: "Am
 // B3. Track confirmaciones de agente — diario a las 11:00pm
 cron.schedule("0 23 * * *", () => triggerJob("track_confirmations"), { timezone: "America/Costa_Rica" })
 
-console.log("⏰ Cron runner iniciado. 13 jobs Agente 1 + 7 jobs Marketing + 3 jobs Billing = 23 jobs programados.")
+// N1. Encuestas de satisfacción 3 días post-cita — diario a las 10:45am
+cron.schedule("45 10 * * *", () => triggerJob("survey_request_3d"), { timezone: "America/Costa_Rica" })
+
+// N2. SINPE — expirar pagos vencidos — cada 30 min
+cron.schedule("*/30 * * * *", () => triggerJob("sinpe_expire"), { timezone: "America/Costa_Rica" })
+
+// N3. Hacienda ATV — verificar estado facturas pendientes — cada 15 min
+cron.schedule("*/15 * * * *", () => triggerJob("hacienda_check_pending"), { timezone: "America/Costa_Rica" })
+
+console.log("⏰ Cron runner iniciado. 13 jobs Agente 1 + 7 jobs Marketing + 3 jobs Billing + 3 jobs Nuevos = 26 jobs programados.")
 console.log(`📡 Apuntando a: ${APP_URL}`)
 
 // Keep process alive

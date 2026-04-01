@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Phone, Mail, CalendarDays, User, AlertTriangle, FileText, MessageSquare, Receipt, Camera } from "lucide-react"
+import { ArrowLeft, Phone, Mail, CalendarDays, User, AlertTriangle, FileText, MessageSquare, Receipt, Camera, Package, CalendarClock } from "lucide-react"
 import { cn, formatDate, formatDateTime, formatCurrency } from "@/lib/utils"
 
 const TAG_COLORS: Record<string, string> = {
@@ -90,15 +90,30 @@ interface Invoice {
   created_at: string
 }
 
+interface PatientPackage {
+  id: string
+  sessions_used: number
+  sessions_total: number
+  purchased_at: string
+  expires_at: string
+  status: string
+  payment_status: string
+  amount_paid: number
+  notes?: string
+  packages: { name: string; service_id: string } | null
+  services?: { name: string } | null
+}
+
 interface Props {
   patient: Patient
   appointments: Appointment[]
   records: ClinicalRecord[]
   conversations: Conversation[]
   invoices: Invoice[]
+  patientPackages: PatientPackage[]
 }
 
-export function PatientDetailClient({ patient, appointments, records, conversations, invoices }: Props) {
+export function PatientDetailClient({ patient, appointments, records, conversations, invoices, patientPackages }: Props) {
   const age = patient.birth_date
     ? new Date().getFullYear() - new Date(patient.birth_date).getFullYear()
     : null
@@ -206,6 +221,14 @@ export function PatientDetailClient({ patient, appointments, records, conversati
           <TabsTrigger value="comunicaciones" className="gap-1.5">
             <MessageSquare className="w-3.5 h-3.5" />
             Mensajes
+          </TabsTrigger>
+          <TabsTrigger value="paquetes" className="gap-1.5">
+            <Package className="w-3.5 h-3.5" />
+            Paquetes {patientPackages.filter((p) => p.status === "active").length > 0 && (
+              <span className="ml-1 px-1.5 py-0 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700">
+                {patientPackages.filter((p) => p.status === "active").length}
+              </span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="facturacion" className="gap-1.5">
             <Receipt className="w-3.5 h-3.5" />
@@ -346,6 +369,70 @@ export function PatientDetailClient({ patient, appointments, records, conversati
               </div>
             )}
           </div>
+        </TabsContent>
+
+        {/* Tab: Paquetes */}
+        <TabsContent value="paquetes" className="mt-4 space-y-3">
+          {patientPackages.length === 0 ? (
+            <div className="card-premium text-center py-12 text-muted-foreground">
+              <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">Sin paquetes asignados</p>
+            </div>
+          ) : (
+            patientPackages.map((pp) => {
+              const pct = pp.sessions_total > 0 ? (pp.sessions_used / pp.sessions_total) * 100 : 0
+              const remaining = pp.sessions_total - pp.sessions_used
+              const isExpiringSoon = new Date(pp.expires_at) < new Date(Date.now() + 30 * 86400000)
+              return (
+                <div key={pp.id} className="card-premium p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-sm">{pp.packages?.name ?? "Paquete"}</p>
+                      {pp.services && <p className="text-xs text-muted-foreground">{pp.services.name}</p>}
+                    </div>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
+                      pp.status === "active" ? "bg-emerald-100 text-emerald-700" :
+                      pp.status === "completed" ? "bg-blue-100 text-blue-700" :
+                      pp.status === "expired" ? "bg-red-100 text-red-600" :
+                      "bg-gray-100 text-gray-500"
+                    )}>
+                      {pp.status === "active" ? "Activo" : pp.status === "completed" ? "Completado" : pp.status === "expired" ? "Vencido" : "Cancelado"}
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{pp.sessions_used} de {pp.sessions_total} sesiones usadas</span>
+                      <span className="font-medium text-foreground">{remaining} restantes</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all",
+                          pp.status === "completed" ? "bg-blue-500" : "bg-violet-500"
+                        )}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <CalendarClock className="w-3 h-3" />
+                      Vence {new Date(pp.expires_at).toLocaleDateString("es-CR")}
+                    </span>
+                    {isExpiringSoon && pp.status === "active" && (
+                      <span className="text-amber-600 font-medium">⚠ Vence pronto</span>
+                    )}
+                    {remaining <= 2 && pp.status === "active" && (
+                      <span className="text-orange-600 font-medium">⚠ Quedan {remaining} sesiones</span>
+                    )}
+                  </div>
+                  {pp.notes && <p className="text-xs text-muted-foreground italic">{pp.notes}</p>}
+                </div>
+              )
+            })
+          )}
         </TabsContent>
 
         {/* Tab: Facturación */}

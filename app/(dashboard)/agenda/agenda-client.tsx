@@ -12,7 +12,7 @@ import { AppointmentModal, type ModalAppointment } from "./appointment-modal"
 // ---------- constants ----------
 const HOUR_HEIGHT = 56   // px per hour
 const DAY_START   = 7    // 7:00 AM
-const DAY_END     = 20   // 8:00 PM
+const DAY_END     = 22   // 10:00 PM
 const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => DAY_START + i)
 
 // Soft palette per professional index
@@ -49,11 +49,59 @@ interface Appointment {
   services:      { name: string; duration_minutes: number } | null
 }
 
+interface Room { id: string; name: string; equipment: string[] }
+
 interface Props {
   clinicId: string
   professionals: Professional[]
   services: Service[]
   patients: Patient[]
+  rooms?: Room[]
+}
+
+// ---------- overlap layout ----------
+// Returns colIndex (0-based) and totalCols for each appointment in a day,
+// so they can be positioned side-by-side without overlapping.
+function computeColumns(appts: Appointment[]): { appt: Appointment; colIndex: number; totalCols: number }[] {
+  if (appts.length === 0) return []
+
+  const sorted = [...appts].sort(
+    (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+  )
+
+  const colEnds: number[] = [] // tracks end-time (ms) of the last appt in each column
+  const indexed: { appt: Appointment; colIndex: number }[] = []
+
+  for (const appt of sorted) {
+    const startMs = new Date(appt.start_time).getTime()
+    const endMs   = new Date(appt.end_time).getTime()
+
+    let placed = false
+    for (let i = 0; i < colEnds.length; i++) {
+      if (colEnds[i] <= startMs) {
+        colEnds[i] = endMs
+        indexed.push({ appt, colIndex: i })
+        placed = true
+        break
+      }
+    }
+    if (!placed) {
+      indexed.push({ appt, colIndex: colEnds.length })
+      colEnds.push(endMs)
+    }
+  }
+
+  // For each appt, totalCols = how many appts overlap with it (including itself)
+  return indexed.map((r) => {
+    const sMs = new Date(r.appt.start_time).getTime()
+    const eMs = new Date(r.appt.end_time).getTime()
+    const totalCols = indexed.filter(({ appt }) => {
+      const s = new Date(appt.start_time).getTime()
+      const e = new Date(appt.end_time).getTime()
+      return s < eMs && e > sMs
+    }).length
+    return { ...r, totalCols }
+  })
 }
 
 // ---------- helpers ----------
@@ -81,7 +129,7 @@ function minutesToTimeStr(minutes: number): string {
 }
 
 // ---------- component ----------
-export function AgendaClient({ clinicId, professionals, services, patients }: Props) {
+export function AgendaClient({ clinicId, professionals, services, patients, rooms = [] }: Props) {
   // Week starting on Monday
   const [weekStart, setWeekStart] = useState<Date>(() => {
     const now = new Date()
@@ -275,12 +323,14 @@ export function AgendaClient({ clinicId, professionals, services, patients }: Pr
                   />
                 ))}
 
-                {/* Appointments */}
-                {dayAppts.map((appt) => {
-                  const startMin = utcToCRMinutes(appt.start_time)
-                  const endMin   = utcToCRMinutes(appt.end_time)
-                  const top    = Math.max(0, (startMin - DAY_START * 60) / 60 * HOUR_HEIGHT)
-                  const height = Math.max(20, (endMin - startMin) / 60 * HOUR_HEIGHT - 2)
+                {/* Appointments — positioned side-by-side when overlapping */}
+                {computeColumns(dayAppts).map(({ appt, colIndex, totalCols }) => {
+                  const startMin  = utcToCRMinutes(appt.start_time)
+                  const endMin    = utcToCRMinutes(appt.end_time)
+                  const top       = Math.max(0, (startMin - DAY_START * 60) / 60 * HOUR_HEIGHT)
+                  const height    = Math.max(20, (endMin - startMin) / 60 * HOUR_HEIGHT - 2)
+                  const colWidth  = 100 / totalCols
+                  const leftPct   = colIndex * colWidth
                   const colorClass = profColorMap.get(appt.professional_id) ?? PROF_COLORS[0]
                   const overlay    = STATUS_OVERLAY[appt.status] ?? ""
                   const svcName    = appt.services?.name ?? "Servicio"
@@ -293,12 +343,17 @@ export function AgendaClient({ clinicId, professionals, services, patients }: Pr
                       data-appt="true"
                       onClick={(e) => { e.stopPropagation(); openEdit(appt) }}
                       className={cn(
-                        "absolute left-0.5 right-0.5 rounded-md border px-1.5 py-1 cursor-pointer",
+                        "absolute rounded-md border px-1.5 py-1 cursor-pointer",
                         "hover:brightness-95 transition-all overflow-hidden select-none",
                         colorClass,
                         overlay,
                       )}
-                      style={{ top, height }}
+                      style={{
+                        top,
+                        height,
+                        left: `${leftPct + 0.5}%`,
+                        width: `${colWidth - 1}%`,
+                      }}
                     >
                       <p className="text-[11px] font-semibold leading-tight truncate">{patName}</p>
                       {height > 30 && (
@@ -333,6 +388,7 @@ export function AgendaClient({ clinicId, professionals, services, patients }: Pr
         professionals={professionals}
         services={services}
         patients={patients}
+        rooms={rooms}
         prefillDate={modal.prefillDate}
         prefillTime={modal.prefillTime}
         prefillProfId={modal.prefillProfId}

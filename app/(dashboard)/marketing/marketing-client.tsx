@@ -4,8 +4,9 @@ import { useState } from "react"
 import {
   Megaphone, Users, TrendingUp, Mail, BarChart3, Bot, Calendar,
   CheckCircle2, XCircle, AlertCircle, Clock, Eye, MousePointerClick,
-  RefreshCw, ChevronRight, Star, Send, Filter,
+  RefreshCw, ChevronRight, Star, Send, Filter, MessageSquare, Sparkles,
 } from "lucide-react"
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -230,6 +231,30 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
 
   return (
     <div className="space-y-6">
+      {/* ── Quick actions — Chat y Calendario ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Link href="/marketing/chat" className="group flex items-center gap-4 bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4 hover:shadow-md transition-all">
+          <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+            <MessageSquare className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-violet-900">Chat con el agente</p>
+            <p className="text-xs text-violet-600 mt-0.5">Pedile campañas, copy y estrategia</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-violet-400 ml-auto group-hover:translate-x-0.5 transition-transform" />
+        </Link>
+        <Link href="/marketing/calendar" className="group flex items-center gap-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4 hover:shadow-md transition-all">
+          <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+            <Sparkles className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-emerald-900">Calendario de contenido</p>
+            <p className="text-xs text-emerald-600 mt-0.5">Plan semanal generado por IA</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-emerald-400 ml-auto group-hover:translate-x-0.5 transition-transform" />
+        </Link>
+      </div>
+
       {/* ── Stat cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Send}             label="Mensajes enviados (30d)" value={fmt(stats.totalSent)}    sub="Total marketing" />
@@ -262,6 +287,9 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
           </TabsTrigger>
           <TabsTrigger value="agent">
             <Bot className="w-3.5 h-3.5 mr-1.5" />Agente
+          </TabsTrigger>
+          <TabsTrigger value="ia_imagenes">
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" />IA Imágenes
           </TabsTrigger>
         </TabsList>
 
@@ -546,7 +574,131 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
             </CardContent>
           </Card>
         </TabsContent>
+        {/* ── IA IMÁGENES TAB ── */}
+        <TabsContent value="ia_imagenes" className="space-y-4 mt-4">
+          <ImageGeneratorPanel />
+        </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+// ── Image Generator Panel ─────────────────────────────────────────────────────
+
+function ImageGeneratorPanel() {
+  const [serviceType, setServiceType] = useState("general")
+  const [style, setStyle] = useState("modern")
+  const [format, setFormat] = useState("square")
+  const [customPrompt, setCustomPrompt] = useState("")
+  const [generating, setGenerating] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function generate() {
+    setGenerating(true)
+    setResult(null)
+    setError(null)
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "marketing",
+          serviceType,
+          style,
+          format,
+          customPrompt: customPrompt || undefined,
+          clinicName: "Mi Clínica",
+        }),
+      })
+      const data = await res.json()
+      if (data.ok) setResult(data.url)
+      else setError(data.error ?? "Error generando imagen")
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-500" />
+          Generador de imágenes con IA
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Tipo de servicio</label>
+            <select
+              className="mt-1 w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              value={serviceType}
+              onChange={(e) => setServiceType(e.target.value)}
+            >
+              {[["general","General"],["facial","Facial / Skincare"],["laser","Láser"],["botox","Botox"],["fillers","Fillers"],["massage","Masajes"],["hair","Cabello"],["nails","Uñas"]].map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Estilo</label>
+            <select
+              className="mt-1 w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+            >
+              {[["modern","Moderno"],["elegant","Elegante"],["warm","Cálido"],["fresh","Fresco"],["luxe","Luxury"]].map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Formato</label>
+            <select
+              className="mt-1 w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
+              <option value="square">Cuadrado (Instagram 1:1)</option>
+              <option value="portrait">Vertical (Stories 4:5)</option>
+              <option value="landscape">Horizontal (Banner)</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Prompt personalizado (opcional)</label>
+          <textarea
+            className="mt-1 w-full border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+            rows={2}
+            placeholder="Descripción adicional para la imagen..."
+            value={customPrompt}
+            onChange={(e) => setCustomPrompt(e.target.value)}
+          />
+        </div>
+        <Button onClick={generate} disabled={generating} className="gap-2">
+          <Sparkles className="w-4 h-4" />
+          {generating ? "Generando..." : "Generar imagen"}
+        </Button>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {result && (
+          <div className="space-y-2">
+            <img src={result} alt="Generated" className="rounded-xl border border-border w-full max-w-sm" />
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => window.open(result!, "_blank")}>
+                Abrir en nueva pestaña
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {
+                const a = document.createElement("a"); a.href = result!; a.download = "marketing.png"; a.click()
+              }}>
+                Descargar
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

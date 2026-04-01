@@ -43,8 +43,17 @@ interface Props {
     bookings: number
     escalationRate: number
     daily: DailySeries[]
+    agentRevenue?: number
+    apptsBySource?: { name: string; value: number }[]
   }
   professionals: { id: string; name: string }[]
+  userRole?: string
+  commissions?: {
+    total: number
+    byProfessional: { name: string; total: number; pending: number; count: number }[]
+  }
+  packages?: { sold: number; revenue: number }
+  surveys?: { total: number; avgScore: number; nps: number; scoreDistribution: { score: string; count: number }[] }
 }
 
 // ── Colors ─────────────────────────────────────────────────────────────
@@ -71,7 +80,8 @@ function revenueTooltip({ active, payload, label }: Record<string, unknown>) {
 
 // ── Main Component ─────────────────────────────────────────────────────
 
-export function MetricsClient({ period, revenue, appointments, patients, agent, professionals }: Props) {
+export function MetricsClient({ period, revenue, appointments, patients, agent, professionals, userRole, commissions, packages, surveys }: Props) {
+  const canViewFinancial = !userRole || userRole === "owner"
   const router = useRouter()
   const pathname = usePathname()
 
@@ -134,18 +144,28 @@ export function MetricsClient({ period, revenue, appointments, patients, agent, 
         <KpiCard icon={<Users className="w-4 h-4" />} label="Pacientes nuevos" value={patients.new.toString()} sub={`Retención: ${patients.retentionRate}%`} color="emerald" />
         <KpiCard icon={<Bot className="w-4 h-4" />} label="Agente IA" value={agent.total.toString()} sub={`${agent.escalationRate}% escaladas`} color="amber" />
       </div>
+      {/* Phase 2 KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <KpiCard icon={<Download className="w-4 h-4" />} label="Paquetes vendidos" value={(packages?.sold ?? 0).toString()} sub={`Revenue: ${formatCurrency(packages?.revenue ?? 0)}`} color="violet" />
+        <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="Comisiones pendientes" value={formatCurrency(commissions?.byProfessional.reduce((s, p) => s + p.pending, 0) ?? 0)} sub={`Total periodo: ${formatCurrency(commissions?.total ?? 0)}`} color="amber" />
+        {(surveys?.total ?? 0) > 0 && (
+          <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="NPS encuestas" value={`${surveys!.nps > 0 ? "+" : ""}${surveys!.nps}`} sub={`Promedio: ${surveys!.avgScore}/5 · ${surveys!.total} resp.`} color="emerald" />
+        )}
+      </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="revenue">
-        <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="revenue">Revenue</TabsTrigger>
+      <Tabs defaultValue={canViewFinancial ? "revenue" : "citas"}>
+        <TabsList className="w-full sm:w-auto flex-wrap">
+          {canViewFinancial && <TabsTrigger value="revenue">Revenue</TabsTrigger>}
           <TabsTrigger value="citas">Citas</TabsTrigger>
           <TabsTrigger value="pacientes">Pacientes</TabsTrigger>
           <TabsTrigger value="agente">Agente</TabsTrigger>
+          {canViewFinancial && <TabsTrigger value="comisiones">Comisiones</TabsTrigger>}
+          {(surveys?.total ?? 0) > 0 && <TabsTrigger value="encuestas">Encuestas</TabsTrigger>}
         </TabsList>
 
-        {/* ── Revenue Tab ────────────────────────────────────────────── */}
-        <TabsContent value="revenue" className="mt-4 space-y-4">
+        {/* ── Revenue Tab (owner only) ───────────────────────────────── */}
+        {canViewFinancial && <TabsContent value="revenue" className="mt-4 space-y-4">
           {/* Daily revenue area chart */}
           <ChartCard title="Revenue diario" subtitle={formatCurrency(revenue.total)}>
             <ResponsiveContainer width="100%" height={220}>
@@ -236,7 +256,7 @@ export function MetricsClient({ period, revenue, appointments, patients, agent, 
               </div>
             </ChartCard>
           )}
-        </TabsContent>
+        </TabsContent>}
 
         {/* ── Citas Tab ──────────────────────────────────────────────── */}
         <TabsContent value="citas" className="mt-4 space-y-4">
@@ -358,6 +378,35 @@ export function MetricsClient({ period, revenue, appointments, patients, agent, 
             <StatBox label="Tasa escalación" value={`${agent.escalationRate}%`} highlight={agent.escalationRate > 20} />
           </div>
 
+          {/* Revenue atribuido al agente + citas por origen */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ChartCard title="Citas: Agente IA vs Manual">
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={agent.apptsBySource ?? []} margin={{ left: 0, right: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="value" name="Citas" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <div className="card-premium p-4 flex flex-col justify-center gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Revenue atribuido al agente IA</p>
+                <p className="text-2xl font-bold text-emerald-600">{formatCurrency(agent.agentRevenue ?? 0)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Citas completadas que el agente agendó</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">% de revenue generado por IA</p>
+                <p className="text-xl font-bold">
+                  {revenue.total > 0 ? Math.round(((agent.agentRevenue ?? 0) / revenue.total) * 100) : 0}%
+                </p>
+              </div>
+            </div>
+          </div>
+
           <ChartCard title="Conversaciones por día">
             {agent.daily.every((d) => d.value === 0) ? <EmptyChart label="Sin conversaciones en el período" /> : (
               <ResponsiveContainer width="100%" height={200}>
@@ -387,6 +436,93 @@ export function MetricsClient({ period, revenue, appointments, patients, agent, 
             </div>
           </div>
         </TabsContent>
+
+        {/* ── Comisiones Tab (owner only) ─────────────────────────────── */}
+        {canViewFinancial && (
+          <TabsContent value="comisiones" className="mt-4 space-y-4">
+            {commissions && commissions.byProfessional.length > 0 ? (
+              <>
+                <ChartCard title="Comisiones por profesional" subtitle={`Total: ${formatCurrency(commissions.total)}`}>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart
+                      layout="vertical"
+                      data={commissions.byProfessional}
+                      margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis type="number" tickFormatter={(v) => `₡${(v/1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
+                      <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                      <Legend />
+                      <Bar dataKey="total" name="Total comisión" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="pending" name="Pendiente pago" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+
+                <div className="card-premium overflow-hidden">
+                  <div className="px-4 py-2 border-b border-border">
+                    <p className="text-sm font-semibold">Detalle por profesional</p>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {commissions.byProfessional.map((p) => (
+                      <div key={p.name} className="px-4 py-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium">{p.name}</p>
+                          <p className="text-xs text-muted-foreground">{p.count} citas completadas</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold">{formatCurrency(p.total)}</p>
+                          {p.pending > 0 && (
+                            <p className="text-xs text-amber-600">₡{formatCurrency(p.pending)} pendiente</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="card-premium text-center py-12 text-muted-foreground text-sm">
+                Sin comisiones registradas en este período
+              </div>
+            )}
+          </TabsContent>
+        )}
+
+        {/* ── Encuestas Tab ───────────────────────────────────────────── */}
+        {(surveys?.total ?? 0) > 0 && (
+          <TabsContent value="encuestas" className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <StatBox label="Respuestas totales" value={surveys!.total} />
+              <StatBox label="Puntaje promedio" value={`${surveys!.avgScore}/5`} highlight />
+              <StatBox label="NPS" value={`${surveys!.nps > 0 ? "+" : ""}${surveys!.nps}`} highlight={surveys!.nps >= 0} />
+            </div>
+
+            <ChartCard title="Distribución de puntajes" subtitle="Cantidad de respuestas por calificación">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={surveys!.scoreDistribution} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="score" tick={{ fontSize: 11 }} tickFormatter={(v) => `★ ${v}`} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip formatter={(v: number) => [`${v} respuestas`, "Cantidad"]} />
+                  <Bar dataKey="count" name="Respuestas" radius={[4, 4, 0, 0]}>
+                    {surveys!.scoreDistribution.map((entry, i) => (
+                      <Cell key={i} fill={Number(entry.score) >= 4 ? "#10b981" : Number(entry.score) === 3 ? "#f59e0b" : "#ef4444"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <div className="card-premium p-4 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">NPS breakdown</p>
+              <ProgressRow label={`Promotores (★5) — ${surveys!.scoreDistribution[4]?.count ?? 0}`} value={surveys!.total > 0 ? Math.round((surveys!.scoreDistribution[4]?.count ?? 0) / surveys!.total * 100) : 0} color="emerald" />
+              <ProgressRow label={`Neutros (★3-4) — ${(surveys!.scoreDistribution[2]?.count ?? 0) + (surveys!.scoreDistribution[3]?.count ?? 0)}`} value={surveys!.total > 0 ? Math.round(((surveys!.scoreDistribution[2]?.count ?? 0) + (surveys!.scoreDistribution[3]?.count ?? 0)) / surveys!.total * 100) : 0} color="blue" />
+              <ProgressRow label={`Detractores (★1-2) — ${(surveys!.scoreDistribution[0]?.count ?? 0) + (surveys!.scoreDistribution[1]?.count ?? 0)}`} value={surveys!.total > 0 ? Math.round(((surveys!.scoreDistribution[0]?.count ?? 0) + (surveys!.scoreDistribution[1]?.count ?? 0)) / surveys!.total * 100) : 0} color="violet" />
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

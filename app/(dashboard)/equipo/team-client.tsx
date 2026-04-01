@@ -8,12 +8,16 @@ import { cn, getInitials } from "@/lib/utils"
 import { ProfessionalModal, type ProfessionalRow } from "./professional-modal"
 import { deleteProfessional, toggleProfessional } from "./actions"
 
+interface Service { id: string; name: string; price: number }
+
 interface Props {
   clinicId: string
   initialProfessionals: ProfessionalRow[]
+  services: Service[]
+  isOwner?: boolean
 }
 
-export function TeamClient({ clinicId, initialProfessionals }: Props) {
+export function TeamClient({ clinicId, initialProfessionals, services, isOwner = false }: Props) {
   const [professionals, setProfessionals] = useState(initialProfessionals)
   const [modal, setModal] = useState<{ open: boolean; professional: ProfessionalRow | null }>({ open: false, professional: null })
   const [, startTransition] = useTransition()
@@ -62,6 +66,9 @@ export function TeamClient({ clinicId, initialProfessionals }: Props) {
           )}
           {prof.bio && (
             <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{prof.bio}</p>
+          )}
+          {(prof as any).default_commission_percentage > 0 && (
+            <p className="text-[11px] text-violet-600 mt-0.5">Comisión {(prof as any).default_commission_percentage}%</p>
           )}
         </div>
 
@@ -127,6 +134,8 @@ export function TeamClient({ clinicId, initialProfessionals }: Props) {
         onSaved={handleSaved}
         clinicId={clinicId}
         professional={modal.professional}
+        isOwner={isOwner}
+        services={services}
       />
     </div>
   )

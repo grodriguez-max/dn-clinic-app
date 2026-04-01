@@ -12,6 +12,7 @@ import { processMessage } from "@/lib/agent/receptionist"
 import { sendNoShowAlert, sendDailySummary, sendTrialEndingEmail, sendPlatformInvoiceEmail } from "@/lib/notifications/email"
 import { generateMonthlyInvoice, getSubscription } from "@/lib/billing/subscription"
 import { trackBillableAction } from "@/lib/billing/subscription"
+import { createNotification } from "@/lib/notifications/inapp"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -182,6 +183,47 @@ async function runCronJob(job: string): Promise<unknown> {
       return { processed: results.length }
     }
 
+    // ── 5b. Encuesta de satisfacción 3 días después ─────────────────────
+    case "survey_request_3d": {
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+      const windowStart = new Date(threeDaysAgo); windowStart.setHours(0, 0, 0, 0)
+      const windowEnd   = new Date(threeDaysAgo); windowEnd.setHours(23, 59, 59, 999)
+
+      const { data: appts } = await supabase
+        .from("appointments")
+        .select("id, clinic_id, patient_id, patients(name, phone), clinics(settings)")
+        .eq("status", "completed")
+        .gte("start_time", windowStart.toISOString())
+        .lte("start_time", windowEnd.toISOString())
+
+      const results = []
+      for (const appt of (appts ?? [])) {
+        const patient = appt.patients as { name: string; phone: string } | null
+        const clinic = appt.clinics as { settings: Record<string, unknown> } | null
+        if (!patient?.phone) continue
+
+        // Get clinic's active survey template
+        const settings = clinic?.settings ?? {}
+        const surveyTemplateId = settings.survey_template_id as string | null
+        if (!surveyTemplateId) continue
+
+        // Check if already sent survey for this appointment
+        const { data: existing } = await supabase
+          .from("survey_responses")
+          .select("id")
+          .eq("appointment_id", appt.id)
+          .maybeSingle()
+        if (existing) continue
+
+        const surveyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/survey/${surveyTemplateId}?p=${appt.patient_id}&a=${appt.id}`
+        const message = `Hola ${patient.name} 😊 Nos importa tu experiencia. ¿Podés tomarte 1 minuto para calificar tu visita? ${surveyUrl}`
+
+        await processMessage({ phone: patient.phone, text: `[CRON:survey] ${message}`, clinicId: appt.clinic_id })
+        results.push({ appointment_id: appt.id, patient: patient.name })
+      }
+      return { processed: results.length }
+    }
+
     // ── 6. Solicitud de reseña 7 días después ───────────────────────────
     case "review_request_7d": {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -280,17 +322,18 @@ async function runCronJob(job: string): Promise<unknown> {
       return { processed: results.length }
     }
 
-    // ── 9. Alerta no-show en tiempo real (cada 10 min) ──────────────────
+    // ── 9. Auto no-show: marca citas no completadas 30 min después de end_time (cada 10 min) ──
+    // DETECCIÓN: si end_time ya pasó hace ≥30 min y el status aún es confirmed/pending → no_show
     case "noshow_realtime_alert": {
-      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000)
-      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000)
+      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000)
+      const sixtyMinAgo  = new Date(Date.now() - 60 * 60 * 1000)
 
       const { data: appts } = await supabase
         .from("appointments")
-        .select("id, clinic_id, patients(name, phone), professionals(name), services(name)")
+        .select("id, clinic_id, start_time, end_time, patients(name, phone), professionals(name), services(name)")
         .in("status", ["confirmed", "pending"])
-        .gte("start_time", twentyMinAgo.toISOString())
-        .lte("start_time", tenMinAgo.toISOString())
+        .gte("end_time", sixtyMinAgo.toISOString())   // not too old
+        .lte("end_time", thirtyMinAgo.toISOString())  // end_time was ≥30 min ago
 
       for (const appt of (appts ?? [])) {
         // Mark as no_show
@@ -316,6 +359,15 @@ async function runCronJob(job: string): Promise<unknown> {
             appUrl: process.env.NEXT_PUBLIC_APP_URL,
           })
         }
+        // In-app notification
+        void createNotification({
+          clinic_id: appt.clinic_id,
+          type: "no_show",
+          title: "No-show detectado automáticamente",
+          description: `${patient?.name ?? "Paciente"} no se presentó para ${service?.name ?? "cita"} con ${prof?.name ?? "profesional"}`,
+          link: "/agenda",
+        })
+
         console.log(`[noshow_alert] ${patient?.name} no se presentó para ${service?.name} con ${prof?.name}`)
       }
       return { no_shows_detected: appts?.length ?? 0 }
@@ -551,6 +603,31 @@ async function runCronJob(job: string): Promise<unknown> {
       }
 
       return { processed: (confirmedAppts ?? []).length }
+    }
+
+    // ── 17. SINPE — expire pending payments ─────────────────────────────
+    case "sinpe_expire": {
+      const { expireSinpePayments } = await import("@/lib/payments/sinpe")
+      const expired = await expireSinpePayments()
+      return { expired }
+    }
+
+    // ── 18. ATV Hacienda — check pending invoice status ─────────────────
+    case "hacienda_check_pending": {
+      const { data: pending } = await supabase
+        .from("electronic_invoices")
+        .select("clave, clinic_id")
+        .eq("estado_hacienda", "pendiente")
+        .lt("sent_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()) // older than 5 min
+        .limit(50)
+
+      const { checkInvoiceStatus } = await import("@/lib/billing/hacienda")
+      let updated = 0
+      for (const inv of (pending ?? [])) {
+        const result = await checkInvoiceStatus(inv.clinic_id, inv.clave)
+        if (result.estado !== "pendiente") updated++
+      }
+      return { checked: pending?.length ?? 0, updated }
     }
 
     default:

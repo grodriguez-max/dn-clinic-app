@@ -19,7 +19,7 @@ export default async function PatientDetailPage({ params }: { params: { id: stri
 
   if (!patient) notFound()
 
-  const [appointmentsRes, recordsRes, conversationsRes, invoicesRes] = await Promise.all([
+  const [appointmentsRes, recordsRes, conversationsRes, invoicesRes, patientPkgsRes] = await Promise.all([
     supabase
       .from("appointments")
       .select("id, start_time, end_time, status, notes, professionals(name), services(name, price)")
@@ -47,6 +47,13 @@ export default async function PatientDetailPage({ params }: { params: { id: stri
       .eq("patient_id", params.id)
       .order("created_at", { ascending: false })
       .limit(20),
+
+    supabase
+      .from("patient_packages")
+      .select("id, sessions_used, sessions_total, purchased_at, expires_at, status, payment_status, amount_paid, notes, packages(name, service_id, services(name))")
+      .eq("patient_id", params.id)
+      .order("purchased_at", { ascending: false })
+      .limit(20),
   ])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +64,7 @@ export default async function PatientDetailPage({ params }: { params: { id: stri
       records={(recordsRes.data ?? []) as any[]}
       conversations={conversationsRes.data ?? []}
       invoices={invoicesRes.data ?? []}
+      patientPackages={(patientPkgsRes.data ?? []) as any[]}
     />
   )
 }

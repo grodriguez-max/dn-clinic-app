@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createCRInvoice, type CRInvoiceInput, type InvoiceLineItem, type TaxRate } from "@/lib/billing/cr-invoice"
 import { revalidatePath } from "next/cache"
+import { sendCRInvoiceEmail } from "@/lib/notifications/email"
 
 // ── Create Invoice ─────────────────────────────────────────────────────────────
 
@@ -101,6 +102,29 @@ export async function createInvoice(formData: CreateInvoiceFormData) {
   // If appointment was passed, mark it as invoiced
   if (formData.appointment_id) {
     await supabase.from("appointments").update({ status: "completed" }).eq("id", formData.appointment_id)
+  }
+
+  // Send invoice by email to patient if they have an email
+  if (formData.receptor_email || invoice?.patient_id) {
+    const emailTarget = formData.receptor_email
+    if (emailTarget) {
+      void sendCRInvoiceEmail({
+        patientEmail: emailTarget,
+        patientName: formData.receptor_nombre ?? "Paciente",
+        clinicName: clinic?.name ?? "Clínica",
+        invoiceNumber: invoice.invoice_number,
+        invoiceType: formData.invoice_type,
+        total: result.total,
+        items: formData.items.map((i) => ({
+          description: i.description,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        })),
+        pdfUrl: process.env.NEXT_PUBLIC_APP_URL
+          ? `${process.env.NEXT_PUBLIC_APP_URL}/api/invoices/${invoice.id}/pdf`
+          : undefined,
+      })
+    }
   }
 
   revalidatePath("/facturacion")

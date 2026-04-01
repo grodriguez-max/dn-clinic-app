@@ -8,9 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { createAppointment, updateAppointment, cancelAppointment } from "./actions"
+import { getPatientActivePackages } from "@/app/(dashboard)/servicios/package-actions"
+import { registerAppointmentPayment, getAppointmentPayments } from "./payment-actions"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { cn } from "@/lib/utils"
+import { Switch } from "@/components/ui/switch"
 
 export interface ModalAppointment {
   id?: string
@@ -27,6 +30,7 @@ export interface ModalAppointment {
 interface Professional { id: string; name: string; specialty: string }
 interface Service { id: string; name: string; duration_minutes: number; price: number }
 interface Patient { id: string; name: string; phone?: string }
+interface Room { id: string; name: string; equipment: string[] }
 
 interface Props {
   open: boolean
@@ -37,6 +41,7 @@ interface Props {
   professionals: Professional[]
   services: Service[]
   patients: Patient[]
+  rooms?: Room[]
   // Pre-fill when clicking an empty slot
   prefillDate?: string   // YYYY-MM-DD
   prefillTime?: string   // HH:MM (CR local)
@@ -77,6 +82,7 @@ export function AppointmentModal({
   professionals,
   services,
   patients,
+  rooms = [],
   prefillDate,
   prefillTime,
   prefillProfId,
@@ -91,8 +97,16 @@ export function AppointmentModal({
   const [time, setTime] = useState("")
   const [notes, setNotes] = useState("")
   const [status, setStatus] = useState("confirmed")
+  const [roomId, setRoomId] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [notifyWhatsApp, setNotifyWhatsApp] = useState(true)
+  const [activePackage, setActivePackage] = useState<{ id: string; name: string; sessions_used: number; sessions_total: number } | null>(null)
+  const [payments, setPayments] = useState<Array<{ id: string; amount: number; payment_type: string; payment_method: string; paid_at: string }>>([])
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [payAmount, setPayAmount] = useState("")
+  const [payType, setPayType] = useState<"deposit" | "full" | "remaining">("deposit")
+  const [payMethod, setPayMethod] = useState<"cash" | "card" | "sinpe" | "transfer">("cash")
 
   // Populate form when modal opens
   useEffect(() => {
@@ -110,6 +124,7 @@ export function AppointmentModal({
       setPatientId("")
       setProfId(prefillProfId ?? professionals[0]?.id ?? "")
       setServiceId("")
+      setRoomId("")
       setDate(prefillDate ?? format(new Date(), "yyyy-MM-dd"))
       setTime(prefillTime ?? "09:00")
       setNotes("")
@@ -118,6 +133,35 @@ export function AppointmentModal({
     }
     setError("")
   }, [open, isEdit])
+
+  // Load payments when editing
+  useEffect(() => {
+    if (isEdit && appointment?.id) {
+      getAppointmentPayments(appointment.id).then(setPayments)
+    } else {
+      setPayments([])
+    }
+    setShowPaymentForm(false)
+    setPayAmount("")
+  }, [open])
+
+  // Detect active package when patient + service change
+  useEffect(() => {
+    if (!patientId || !serviceId) { setActivePackage(null); return }
+    getPatientActivePackages(patientId).then((pkgs) => {
+      const match = pkgs.find((p) => p.packages?.service_id === serviceId)
+      if (match) {
+        setActivePackage({
+          id: match.id,
+          name: match.packages!.name,
+          sessions_used: match.sessions_used,
+          sessions_total: match.sessions_total,
+        })
+      } else {
+        setActivePackage(null)
+      }
+    })
+  }, [patientId, serviceId])
 
   // When service changes, compute end time
   const selectedService = services.find((s) => s.id === serviceId)
@@ -165,7 +209,8 @@ export function AppointmentModal({
           start_time: startUtc,
           end_time: endUtc,
           notes: notes || undefined,
-        })
+          room_id: roomId || undefined,
+        }, notifyWhatsApp)
         if (res.error) { setError(res.error); return }
       }
       onSaved()
@@ -264,6 +309,39 @@ export function AppointmentModal({
             </Select>
           </div>
 
+          {/* Room selector */}
+          {rooms.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Cabina / Sala <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <Select value={roomId} onValueChange={setRoomId}>
+                <SelectTrigger><SelectValue placeholder="Sin cabina asignada" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin cabina</SelectItem>
+                  {rooms.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}{r.equipment.length > 0 && ` · ${r.equipment.slice(0, 2).join(", ")}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Active package indicator */}
+          {activePackage && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-sm">
+              <span className="text-violet-500 shrink-0">📦</span>
+              <div className="min-w-0">
+                <p className="font-medium text-violet-800 text-xs">
+                  Sesión {activePackage.sessions_used + 1} de {activePackage.sessions_total} — {activePackage.name}
+                </p>
+                <p className="text-[11px] text-violet-600">
+                  Al completar la cita se descuenta 1 sesión del paquete
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Date + time */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -318,11 +396,135 @@ export function AppointmentModal({
             />
           </div>
 
+          {/* Payments section (edit mode only) */}
+          {isEdit && appointment?.id && (
+            <div className="space-y-2 pt-1 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pagos</p>
+                {!showPaymentForm && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentForm(true)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    + Registrar pago
+                  </button>
+                )}
+              </div>
+
+              {payments.length > 0 && (
+                <div className="space-y-1">
+                  {payments.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-xs px-2 py-1.5 bg-muted/40 rounded-lg">
+                      <span className="text-muted-foreground capitalize">
+                        {p.payment_type === "deposit" ? "Abono" : p.payment_type === "full" ? "Total" : "Restante"} · {p.payment_method}
+                      </span>
+                      <span className="font-medium">₡{Number(p.amount).toLocaleString("es-CR")}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-xs px-2 font-semibold">
+                    <span>Total pagado</span>
+                    <span>₡{payments.reduce((s, p) => s + Number(p.amount), 0).toLocaleString("es-CR")}</span>
+                  </div>
+                  {selectedService && (
+                    <div className="flex items-center justify-between text-xs px-2 text-muted-foreground">
+                      <span>Precio servicio</span>
+                      <span>₡{selectedService.price.toLocaleString("es-CR")}</span>
+                    </div>
+                  )}
+                  {selectedService && payments.reduce((s, p) => s + Number(p.amount), 0) < selectedService.price && (
+                    <div className="flex items-center justify-between text-xs px-2 text-amber-700 font-semibold">
+                      <span>Saldo pendiente</span>
+                      <span>₡{(selectedService.price - payments.reduce((s, p) => s + Number(p.amount), 0)).toLocaleString("es-CR")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showPaymentForm && (
+                <div className="space-y-2 p-3 bg-muted/30 rounded-lg border border-border">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select value={payType} onValueChange={(v) => setPayType(v as typeof payType)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="deposit">Abono</SelectItem>
+                        <SelectItem value="remaining">Saldo restante</SelectItem>
+                        <SelectItem value="full">Pago total</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={payMethod} onValueChange={(v) => setPayMethod(v as typeof payMethod)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">Efectivo</SelectItem>
+                        <SelectItem value="card">Tarjeta</SelectItem>
+                        <SelectItem value="sinpe">SINPE</SelectItem>
+                        <SelectItem value="transfer">Transferencia</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    placeholder="Monto (₡)"
+                    className="h-8 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 h-7 text-xs"
+                      onClick={() => setShowPaymentForm(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="flex-1 h-7 text-xs"
+                      onClick={async () => {
+                        if (!payAmount || Number(payAmount) <= 0) return
+                        const res = await registerAppointmentPayment(clinicId, {
+                          appointment_id: appointment!.id!,
+                          patient_id: patientId,
+                          amount: Number(payAmount),
+                          payment_type: payType,
+                          payment_method: payMethod,
+                        })
+                        if (!res.error) {
+                          const updated = await getAppointmentPayments(appointment!.id!)
+                          setPayments(updated)
+                          setShowPaymentForm(false)
+                          setPayAmount("")
+                        }
+                      }}
+                    >
+                      Registrar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* WhatsApp notification toggle — only for new appointments */}
+          {!isEdit && (
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-medium">Notificar al paciente por WhatsApp</p>
+                <p className="text-xs text-muted-foreground">Envía confirmación automática con los detalles</p>
+              </div>
+              <Switch checked={notifyWhatsApp} onCheckedChange={setNotifyWhatsApp} />
+            </div>
+          )}
+
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 pt-1 flex-wrap">
             {isEdit && (
               <Button
                 type="button"
@@ -332,6 +534,18 @@ export function AppointmentModal({
                 disabled={loading}
               >
                 Cancelar cita
+              </Button>
+            )}
+            {isEdit && status !== "no_show" && (
+              <Button
+                type="button"
+                variant="outline"
+                className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                onClick={() => setStatus("no_show")}
+                disabled={loading}
+                title="Marcar como no llegó"
+              >
+                No llegó
               </Button>
             )}
             <div className="flex-1" />

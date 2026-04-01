@@ -15,10 +15,10 @@ const HAIKU  = "claude-haiku-4-5-20251001"
 const SONNET = "claude-sonnet-4-6"
 
 export interface IncomingMessage {
-  phone: string        // patient WhatsApp phone
+  phone: string        // patient identifier (phone for WhatsApp, PSID for Instagram)
   text: string         // message content
   clinicId: string
-  channel?: "whatsapp" | "web"
+  channel?: "whatsapp" | "web" | "instagram" | "messenger"
 }
 
 export interface AgentResponse {

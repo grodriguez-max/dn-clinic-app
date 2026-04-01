@@ -466,3 +466,44 @@ export async function sendPlatformInvoiceEmail(opts: {
     html,
   })
 }
+
+// ── CR Invoice email (send to patient when invoice is created) ────────────────
+export async function sendCRInvoiceEmail(opts: {
+  patientEmail: string
+  patientName: string
+  clinicName: string
+  invoiceNumber: string
+  invoiceType: string
+  total: number
+  items: { description: string; quantity: number; unit_price: number }[]
+  pdfUrl?: string
+  appUrl?: string
+}): Promise<SendResult> {
+  const fmt = (n: number) => new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC" }).format(n)
+  const typeLabel: Record<string, string> = {
+    factura: "Factura Electrónica",
+    tiquete: "Tiquete Electrónico",
+    nota_credito: "Nota de Crédito",
+  }
+  const label = typeLabel[opts.invoiceType] ?? opts.invoiceType
+
+  const itemRows = opts.items
+    .map((i) => kv(`${i.description} (x${i.quantity})`, fmt(i.quantity * i.unit_price)))
+    .join("")
+
+  const html = baseTemplate(
+    `${label} ${opts.invoiceNumber}`,
+    `${h2(`🧾 ${label} — ${opts.clinicName}`)}
+     ${p(`Hola ${opts.patientName}, aquí está tu comprobante de pago.`)}
+     ${table([kv("N° Comprobante", opts.invoiceNumber), itemRows, kv("<strong>Total</strong>", `<strong>${fmt(opts.total)}</strong>`)])}
+     ${opts.pdfUrl ? btn("Ver / Descargar PDF", opts.pdfUrl) : ""}
+     ${p("Conservá este comprobante para tus registros. ¡Gracias por tu visita!")}`,
+    opts.clinicName,
+  )
+
+  return sendEmail({
+    to: opts.patientEmail,
+    subject: `🧾 Comprobante ${opts.invoiceNumber} — ${opts.clinicName}`,
+    html,
+  })
+}
