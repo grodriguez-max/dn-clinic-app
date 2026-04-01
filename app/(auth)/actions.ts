@@ -20,7 +20,7 @@ export async function login(formData: FormData) {
     if (error.message.includes("Invalid login credentials")) {
       return { error: "Email o contrasena incorrectos." }
     }
-    return { error: "Error al iniciar sesion. Intenta de nuevo." }
+    return { error: error.message }
   }
 
   redirect("/dashboard")
