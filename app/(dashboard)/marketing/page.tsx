@@ -15,7 +15,10 @@ export default async function MarketingPage() {
   const since30d = new Date(Date.now() - 30 * 86400000).toISOString()
   const since7d  = new Date(Date.now() - 7 * 86400000).toISOString()
 
-  const [campaignsRes, resultsRes, patientsRes, segmentsRes] = await Promise.all([
+  const today = new Date().toISOString().split("T")[0]
+  const in7d  = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]
+
+  const [campaignsRes, resultsRes, patientsRes, segmentsRes, missionsRes, tasksRes, calendarRes, outreachRes] = await Promise.all([
     // All campaigns
     supabase
       .from("campaigns")
@@ -45,12 +48,50 @@ export default async function MarketingPage() {
       .contains("metadata", { type: "marketing_task" })
       .order("created_at", { ascending: false })
       .limit(20),
+
+    // Marketing missions
+    supabase
+      .from("marketing_missions")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .order("priority")
+      .limit(20),
+
+    // Marketing tasks
+    supabase
+      .from("marketing_tasks")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .order("due_date")
+      .limit(30),
+
+    // Content calendar next 14 days
+    supabase
+      .from("content_calendar")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .gte("scheduled_date", today)
+      .lte("scheduled_date", in7d)
+      .order("scheduled_date")
+      .limit(20),
+
+    // Outreach log recent
+    supabase
+      .from("outreach_log")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .order("sent_at", { ascending: false })
+      .limit(30),
   ])
 
   const campaigns = campaignsRes.data ?? []
   const results   = resultsRes.data ?? []
   const patients  = patientsRes.data ?? []
   const taskLogs  = segmentsRes.data ?? []
+  const missions  = missionsRes.data ?? []
+  const tasks     = tasksRes.data ?? []
+  const calendar  = calendarRes.data ?? []
+  const outreach  = outreachRes.data ?? []
 
   // ── Campaign stats ───────────────────────────────────────────────────
   const campaignStats = campaigns.map((c) => {
@@ -122,6 +163,10 @@ export default async function MarketingPage() {
       segments={segments}
       byType={byType}
       taskLogs={taskLogs}
+      missions={missions}
+      tasks={tasks}
+      calendar={calendar}
+      outreach={outreach}
     />
   )
 }

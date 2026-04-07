@@ -5,6 +5,7 @@ import {
   Megaphone, Users, TrendingUp, Mail, BarChart3, Bot, Calendar,
   CheckCircle2, XCircle, AlertCircle, Clock, Eye, MousePointerClick,
   RefreshCw, ChevronRight, Star, Send, Filter, MessageSquare, Sparkles,
+  Target, ListTodo, CalendarDays, Radio, Flag, ArrowUpRight,
 } from "lucide-react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,19 +42,36 @@ interface Campaign {
   stats: CampaignStats
 }
 
+interface Mission {
+  id: string; title: string; description?: string; status: string; priority: string
+  target_metric?: string; current_value?: number; target_value?: number; due_date?: string; phase?: string
+}
+interface Task {
+  id: string; title: string; description?: string; status: string; priority: string
+  assigned_to?: string; due_date?: string; mission_id?: string
+}
+interface CalendarEntry {
+  id: string; scheduled_date: string; platform: string; content_type: string
+  pillar?: string; topic: string; angle?: string; copy_draft?: string; status: string
+}
+interface OutreachEntry {
+  id: string; contact_name?: string; contact_phone?: string; channel: string
+  template_used?: string; status: string; response_text?: string; sent_at: string; follow_up_due?: string
+}
+
 interface MarketingClientProps {
   campaigns: Campaign[]
   stats: { totalSent: number; totalRead: number; totalConverted: number; totalOptOuts: number }
   segments: {
-    total: number
-    opt_out: number
-    leads: number
-    instagram: number
-    birthdays_today: number
-    sources: { name: string; count: number }[]
+    total: number; opt_out: number; leads: number; instagram: number
+    birthdays_today: number; sources: { name: string; count: number }[]
   }
   byType: { type: string; count: number; label: string }[]
   taskLogs: { content: string; metadata: unknown; created_at: string }[]
+  missions: Mission[]
+  tasks: Task[]
+  calendar: CalendarEntry[]
+  outreach: OutreachEntry[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -202,7 +220,7 @@ function CampaignDetail({ c }: { c: Campaign }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }: MarketingClientProps) {
+export function MarketingClient({ campaigns, stats, segments, byType, taskLogs, missions, tasks, calendar, outreach }: MarketingClientProps) {
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null)
   const [typeFilter, setTypeFilter] = useState<string>("all")
 
@@ -231,8 +249,8 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
 
   return (
     <div className="space-y-6">
-      {/* ── Quick actions — Chat y Calendario ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* ── Quick actions ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link href="/marketing/chat" className="group flex items-center gap-4 bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4 hover:shadow-md transition-all">
           <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
             <MessageSquare className="w-5 h-5 text-violet-600" />
@@ -243,12 +261,22 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
           </div>
           <ChevronRight className="w-4 h-4 text-violet-400 ml-auto group-hover:translate-x-0.5 transition-transform" />
         </Link>
+        <Link href="/marketing/drafts" className="group relative flex items-center gap-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 hover:shadow-md transition-all">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+            <Flag className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-amber-900">Aprobar drafts</p>
+            <p className="text-xs text-amber-600 mt-0.5">Revisá y aprobá el contenido del agente</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-amber-400 ml-auto group-hover:translate-x-0.5 transition-transform" />
+        </Link>
         <Link href="/marketing/calendar" className="group flex items-center gap-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4 hover:shadow-md transition-all">
           <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
             <Sparkles className="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <p className="font-semibold text-emerald-900">Calendario de contenido</p>
+            <p className="font-semibold text-emerald-900">Calendario</p>
             <p className="text-xs text-emerald-600 mt-0.5">Plan semanal generado por IA</p>
           </div>
           <ChevronRight className="w-4 h-4 text-emerald-400 ml-auto group-hover:translate-x-0.5 transition-transform" />
@@ -275,22 +303,26 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
       )}
 
       <Tabs defaultValue="campaigns">
-        <TabsList>
-          <TabsTrigger value="campaigns">
-            <Megaphone className="w-3.5 h-3.5 mr-1.5" />Campañas
+        <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="campaigns"><Megaphone className="w-3.5 h-3.5 mr-1.5" />Campañas</TabsTrigger>
+          <TabsTrigger value="missions">
+            <Target className="w-3.5 h-3.5 mr-1.5" />Misiones
+            {missions.filter(m => m.status === "active").length > 0 && (
+              <span className="ml-1 bg-primary text-primary-foreground text-[9px] rounded-full px-1.5">{missions.filter(m => m.status === "active").length}</span>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="analytics">
-            <BarChart3 className="w-3.5 h-3.5 mr-1.5" />Analytics
+          <TabsTrigger value="tasks">
+            <ListTodo className="w-3.5 h-3.5 mr-1.5" />Tareas
+            {tasks.filter(t => t.status === "pending" || t.status === "in_progress").length > 0 && (
+              <span className="ml-1 bg-amber-500 text-white text-[9px] rounded-full px-1.5">{tasks.filter(t => t.status === "pending" || t.status === "in_progress").length}</span>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="segments">
-            <Users className="w-3.5 h-3.5 mr-1.5" />Segmentos
-          </TabsTrigger>
-          <TabsTrigger value="agent">
-            <Bot className="w-3.5 h-3.5 mr-1.5" />Agente
-          </TabsTrigger>
-          <TabsTrigger value="ia_imagenes">
-            <Sparkles className="w-3.5 h-3.5 mr-1.5" />IA Imágenes
-          </TabsTrigger>
+          <TabsTrigger value="calendar"><CalendarDays className="w-3.5 h-3.5 mr-1.5" />Calendario</TabsTrigger>
+          <TabsTrigger value="outreach"><Radio className="w-3.5 h-3.5 mr-1.5" />Outreach</TabsTrigger>
+          <TabsTrigger value="analytics"><BarChart3 className="w-3.5 h-3.5 mr-1.5" />Analytics</TabsTrigger>
+          <TabsTrigger value="segments"><Users className="w-3.5 h-3.5 mr-1.5" />Segmentos</TabsTrigger>
+          <TabsTrigger value="agent"><Bot className="w-3.5 h-3.5 mr-1.5" />Agente</TabsTrigger>
+          <TabsTrigger value="ia_imagenes"><Sparkles className="w-3.5 h-3.5 mr-1.5" />IA Imágenes</TabsTrigger>
         </TabsList>
 
         {/* ── CAMPAÑAS TAB ── */}
@@ -354,6 +386,263 @@ export function MarketingClient({ campaigns, stats, segments, byType, taskLogs }
               )}
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ── MISIONES TAB ── */}
+        <TabsContent value="missions" className="space-y-4 mt-4">
+          {missions.length === 0 ? (
+            <Card><CardContent className="py-14 text-center text-muted-foreground">
+              <Target className="w-8 h-8 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-medium">Sin misiones activas</p>
+              <p className="text-xs mt-1">El agente creará misiones automáticamente o podés definirlas desde el chat.</p>
+            </CardContent></Card>
+          ) : (
+            <div className="space-y-3">
+              {missions.map((m) => {
+                const progress = m.target_value && m.current_value != null
+                  ? Math.min(Math.round((m.current_value / m.target_value) * 100), 100) : null
+                const priorityColor: Record<string, string> = {
+                  urgent: "bg-red-50 border-red-200 text-red-700",
+                  high:   "bg-orange-50 border-orange-200 text-orange-700",
+                  medium: "bg-blue-50 border-blue-200 text-blue-700",
+                  low:    "bg-slate-50 border-slate-200 text-slate-600",
+                }
+                const statusColor: Record<string, string> = {
+                  active:    "text-emerald-600", paused: "text-amber-600",
+                  completed: "text-slate-400",   cancelled: "text-red-400",
+                }
+                return (
+                  <Card key={m.id}>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="font-semibold text-sm">{m.title}</span>
+                            <Badge variant="outline" className={cn("text-[10px] border", priorityColor[m.priority])}>
+                              {m.priority}
+                            </Badge>
+                            {m.phase && <Badge variant="secondary" className="text-[10px]">{m.phase}</Badge>}
+                          </div>
+                          {m.description && <p className="text-xs text-muted-foreground">{m.description}</p>}
+                          {m.target_metric && <p className="text-xs text-muted-foreground mt-1">Meta: {m.target_metric}</p>}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <div className={cn("w-2 h-2 rounded-full", m.status === "active" ? "bg-emerald-500" : "bg-slate-300")} />
+                          <span className={cn("text-xs font-medium", statusColor[m.status])}>{m.status}</span>
+                        </div>
+                      </div>
+                      {progress !== null && (
+                        <div>
+                          <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                            <span>Progreso</span>
+                            <span>{m.current_value}/{m.target_value} — {progress}%</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-1.5">
+                            <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                          </div>
+                        </div>
+                      )}
+                      {m.due_date && (
+                        <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          <Clock className="w-3 h-3" />Vence: {new Date(m.due_date).toLocaleDateString("es-CR")}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── TAREAS TAB ── */}
+        <TabsContent value="tasks" className="space-y-4 mt-4">
+          {tasks.length === 0 ? (
+            <Card><CardContent className="py-14 text-center text-muted-foreground">
+              <ListTodo className="w-8 h-8 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-medium">Sin tareas pendientes</p>
+              <p className="text-xs mt-1">El agente irá creando tareas a medida que ejecuta sus misiones.</p>
+            </CardContent></Card>
+          ) : (
+            <div className="space-y-2">
+              {(["urgent","high","medium","low"] as const).map((priority) => {
+                const group = tasks.filter(t => t.priority === priority)
+                if (group.length === 0) return null
+                const priorityLabel: Record<string, string> = { urgent:"Urgente", high:"Alta", medium:"Media", low:"Baja" }
+                const priorityBg: Record<string, string> = {
+                  urgent: "bg-red-50 border-red-200", high: "bg-orange-50 border-orange-200",
+                  medium: "bg-blue-50 border-blue-200", low: "bg-slate-50 border-slate-200",
+                }
+                const statusIcon: Record<string, React.ElementType> = {
+                  pending: Clock, in_progress: RefreshCw, awaiting_approval: AlertCircle,
+                  completed: CheckCircle2, cancelled: XCircle,
+                }
+                const statusLabel: Record<string, string> = {
+                  pending: "Pendiente", in_progress: "En progreso",
+                  awaiting_approval: "Esperando aprobación", completed: "Completada", cancelled: "Cancelada",
+                }
+                return (
+                  <div key={priority}>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{priorityLabel[priority]}</p>
+                    <div className="space-y-2">
+                      {group.map((t) => {
+                        const SIcon = statusIcon[t.status] ?? Clock
+                        const isOverdue = t.due_date && t.status !== "completed" && new Date(t.due_date) < new Date()
+                        return (
+                          <div key={t.id} className={cn("rounded-lg border p-3 flex items-start gap-3", priorityBg[priority])}>
+                            <SIcon className={cn("w-4 h-4 mt-0.5 shrink-0",
+                              t.status === "completed" ? "text-emerald-500" :
+                              t.status === "awaiting_approval" ? "text-amber-500" :
+                              t.status === "in_progress" ? "text-blue-500" : "text-muted-foreground"
+                            )} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium">{t.title}</span>
+                                <Badge variant="secondary" className="text-[9px]">{statusLabel[t.status] ?? t.status}</Badge>
+                                {isOverdue && <Badge variant="destructive" className="text-[9px]">Vencida</Badge>}
+                              </div>
+                              {t.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.description}</p>}
+                              <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                                {t.assigned_to && <span>Asignada a: {t.assigned_to}</span>}
+                                {t.due_date && <span className={cn(isOverdue && "text-red-500 font-medium")}>Vence: {new Date(t.due_date).toLocaleDateString("es-CR")}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── CALENDARIO TAB ── */}
+        <TabsContent value="calendar" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">Contenido programado para los próximos 7 días</p>
+            <Link href="/marketing/calendar">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Sparkles className="w-3.5 h-3.5" />Generar con IA
+                <ArrowUpRight className="w-3 h-3" />
+              </Button>
+            </Link>
+          </div>
+          {calendar.length === 0 ? (
+            <Card><CardContent className="py-14 text-center text-muted-foreground">
+              <CalendarDays className="w-8 h-8 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-medium">Sin contenido programado esta semana</p>
+              <p className="text-xs mt-1">Generá un plan de contenido con el agente IA.</p>
+            </CardContent></Card>
+          ) : (
+            <div className="space-y-3">
+              {calendar.map((entry) => {
+                const pillarColor: Record<string, string> = {
+                  educativo:    "bg-blue-50 text-blue-700 border-blue-200",
+                  prueba_social:"bg-emerald-50 text-emerald-700 border-emerald-200",
+                  tips:         "bg-violet-50 text-violet-700 border-violet-200",
+                  oferta:       "bg-orange-50 text-orange-700 border-orange-200",
+                  behind_scenes:"bg-slate-50 text-slate-700 border-slate-200",
+                }
+                const statusBadge: Record<string, string> = {
+                  draft:             "bg-slate-100 text-slate-600",
+                  awaiting_approval: "bg-amber-100 text-amber-700",
+                  approved:          "bg-emerald-100 text-emerald-700",
+                  published:         "bg-teal-100 text-teal-700",
+                  cancelled:         "bg-red-100 text-red-600",
+                }
+                const platformIcon: Record<string, string> = {
+                  instagram: "IG", facebook: "FB", whatsapp: "WA", email: "EM", tiktok: "TK",
+                }
+                return (
+                  <Card key={entry.id}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="text-center min-w-[44px]">
+                          <p className="text-xs text-muted-foreground">{new Date(entry.scheduled_date + "T12:00:00").toLocaleDateString("es-CR", { weekday: "short" })}</p>
+                          <p className="text-lg font-bold leading-none">{new Date(entry.scheduled_date + "T12:00:00").getDate()}</p>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="text-xs font-bold bg-muted px-1.5 py-0.5 rounded">{platformIcon[entry.platform] ?? entry.platform}</span>
+                            <span className="text-xs text-muted-foreground">{entry.content_type}</span>
+                            {entry.pillar && (
+                              <Badge variant="outline" className={cn("text-[10px] border", pillarColor[entry.pillar])}>
+                                {entry.pillar.replace("_", " ")}
+                              </Badge>
+                            )}
+                            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", statusBadge[entry.status] ?? statusBadge.draft)}>
+                              {entry.status.replace("_", " ")}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium">{entry.topic}</p>
+                          {entry.angle && <p className="text-xs text-muted-foreground mt-0.5">Ángulo: {entry.angle}</p>}
+                          {entry.copy_draft && (
+                            <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2 bg-muted/50 rounded p-2 font-mono">{entry.copy_draft}</p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── OUTREACH TAB ── */}
+        <TabsContent value="outreach" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">{outreach.length} contactos registrados</p>
+          </div>
+          {outreach.length === 0 ? (
+            <Card><CardContent className="py-14 text-center text-muted-foreground">
+              <Radio className="w-8 h-8 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-medium">Sin registros de outreach</p>
+              <p className="text-xs mt-1">El agente registrará aquí cada contacto de seguimiento individual.</p>
+            </CardContent></Card>
+          ) : (
+            <div className="space-y-2">
+              {outreach.map((o) => {
+                const statusConfig: Record<string, { label: string; color: string }> = {
+                  sent:         { label: "Enviado",   color: "bg-blue-100 text-blue-700" },
+                  delivered:    { label: "Entregado", color: "bg-blue-100 text-blue-700" },
+                  responded:    { label: "Respondió", color: "bg-emerald-100 text-emerald-700" },
+                  interested:   { label: "Interesado",color: "bg-teal-100 text-teal-700" },
+                  not_interested:{ label: "Sin interés",color: "bg-slate-100 text-slate-600" },
+                  opted_out:    { label: "Opt-out",   color: "bg-red-100 text-red-600" },
+                  follow_up_1:  { label: "Follow-up 1",color: "bg-amber-100 text-amber-700" },
+                  follow_up_2:  { label: "Follow-up 2",color: "bg-orange-100 text-orange-700" },
+                  cold:         { label: "Frío",      color: "bg-slate-100 text-slate-500" },
+                }
+                const sc = statusConfig[o.status] ?? { label: o.status, color: "bg-slate-100 text-slate-600" }
+                const isFollowUpDue = o.follow_up_due && new Date(o.follow_up_due) <= new Date()
+                return (
+                  <div key={o.id} className="rounded-lg border bg-card p-3 flex items-start gap-3">
+                    <div className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5", sc.color)}>
+                      {sc.label}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{o.contact_name ?? o.contact_phone ?? "Desconocido"}</span>
+                        <Badge variant="secondary" className="text-[9px]">{o.channel}</Badge>
+                        {isFollowUpDue && <Badge variant="destructive" className="text-[9px]">Follow-up vencido</Badge>}
+                      </div>
+                      {o.template_used && <p className="text-[10px] text-muted-foreground">Template: {o.template_used}</p>}
+                      {o.response_text && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1 italic">"{o.response_text}"</p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                        <span>{relativeTime(o.sent_at)}</span>
+                        {o.follow_up_due && <span className={cn(isFollowUpDue && "text-red-500 font-medium")}>Follow-up: {new Date(o.follow_up_due).toLocaleDateString("es-CR")}</span>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </TabsContent>
 
         {/* ── ANALYTICS TAB ── */}
