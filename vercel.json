@@ -18,35 +18,7 @@
       "maxDuration": 30
     }
   },
-  "crons": [
-    { "path": "/api/crons?job=confirmation_24h",         "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=reminder_2h",              "schedule": "*/30 * * * *" },
-    { "path": "/api/crons?job=checkin_30min",            "schedule": "*/15 * * * *" },
-    { "path": "/api/crons?job=noshow_realtime_alert",    "schedule": "*/30 * * * *" },
-    { "path": "/api/crons?job=post_noshow",              "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=hot_lead_notification",    "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=waitlist_check",           "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=track_confirmations",      "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=sinpe_expire",             "schedule": "0 * * * *"    },
-    { "path": "/api/crons?job=post_appointment_3d",      "schedule": "0 10 * * *"   },
-    { "path": "/api/crons?job=survey_request_3d",        "schedule": "0 11 * * *"   },
-    { "path": "/api/crons?job=review_request_7d",        "schedule": "0 12 * * *"   },
-    { "path": "/api/crons?job=followup_leads_3d",        "schedule": "0 9 * * *"    },
-    { "path": "/api/crons?job=trial_reminder",           "schedule": "0 8 * * *"    },
-    { "path": "/api/crons?job=hacienda_check_pending",   "schedule": "0 6 * * *"    },
-    { "path": "/api/crons?job=daily_summary_owner",      "schedule": "0 23 * * *"   },
-    { "path": "/api/crons?job=metrics_nightly",          "schedule": "0 2 * * *"    },
-    { "path": "/api/crons?job=periodic_treatment_reminder", "schedule": "0 8 * * 1" },
-    { "path": "/api/crons?job=billing_monthly",          "schedule": "0 6 1 * *"    },
-    { "path": "/api/crons/marketing?job=birthdays",                   "schedule": "0 8 * * *"  },
-    { "path": "/api/crons/marketing?job=post_treatment_followup",     "schedule": "0 10 * * *" },
-    { "path": "/api/crons/marketing?job=review_request",              "schedule": "0 11 * * *" },
-    { "path": "/api/crons/marketing?job=followup_warm_leads",         "schedule": "0 15 * * *" },
-    { "path": "/api/crons/marketing?job=reactivation",                "schedule": "0 9 * * 0"  },
-    { "path": "/api/crons/marketing?job=periodic_treatment_reminder", "schedule": "0 8 * * 1"  },
-    { "path": "/api/crons/marketing?job=weekly_report",               "schedule": "0 18 * * 5" }
-  ],
-  "headers": [
+"headers": [
     {
       "source": "/api/(.*)",
       "headers": [
