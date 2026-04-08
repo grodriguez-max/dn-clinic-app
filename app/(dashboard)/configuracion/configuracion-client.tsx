@@ -767,6 +767,16 @@ export function ConfiguracionClient({ clinic, users, currentUserRole }: Props) {
                       }}
                     />
                     <p className="text-xs text-muted-foreground">Encontralo en Google Maps → Compartir → "Embed a map" → buscar el ID en la URL.</p>
+                    <Label className="text-xs mt-2 block">Link de Reseñas (para WhatsApp)</Label>
+                    <Input
+                      className="h-7 text-xs"
+                      placeholder="https://g.page/r/XXXXX/review"
+                      defaultValue={(settings.google_reviews_link as string) ?? ""}
+                      onBlur={async (e) => {
+                        await saveAgentSettings(clinic.id, { google_reviews_link: e.target.value })
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">Google Maps → tu negocio → "Pedir reseñas" → copiar el link corto.</p>
                   </div>
                 </div>
               </div>

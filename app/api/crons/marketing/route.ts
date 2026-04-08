@@ -14,8 +14,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const job = searchParams.get("job")
   const secret = searchParams.get("secret")
+  const authHeader = req.headers.get("authorization")
+  const authorized =
+    secret === process.env.CRON_SECRET ||
+    authHeader === `Bearer ${process.env.CRON_SECRET}`
 
-  if (secret !== process.env.CRON_SECRET) {
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!job) return NextResponse.json({ error: "Missing job param" }, { status: 400 })
