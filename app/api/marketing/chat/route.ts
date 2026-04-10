@@ -21,28 +21,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 })
   }
 
-  const { messages } = await req.json() as { messages: { role: string; content: string }[] }
+  const body = await req.json().catch(() => null)
+  if (!body?.messages) return NextResponse.json({ error: "Body inválido" }, { status: 400 })
+  const { messages } = body as { messages: { role: string; content: string }[] }
 
-  const systemPrompt = await buildMarketingSystemPrompt(profile.clinic_id)
+  let systemPrompt: string
+  try {
+    systemPrompt = await buildMarketingSystemPrompt(profile.clinic_id)
+  } catch (e) {
+    console.error("[marketing/chat] buildMarketingSystemPrompt failed:", e)
+    systemPrompt = "Sos el agente de marketing de una clínica estética. Respondé en español."
+  }
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2048,
-    system: systemPrompt + `\n\nEstás ahora en modo de chat directo con el dueño/a de la clínica. Pueden pedirte:
+  const fullSystem = systemPrompt + `\n\nEstás ahora en modo de chat directo con el dueño/a de la clínica. Pueden pedirte:
 - Crear campañas específicas (genera el copy completo, segmento objetivo, canal recomendado, hora de envío)
 - Analizar métricas de marketing
 - Sugerir ideas de contenido
 - Redactar mensajes de WhatsApp o email
 - Planificar el calendario de contenido
 
-Responde en español. Cuando generes campañas, incluye siempre: CAMPAÑA, SEGMENTO, CANAL, COPY, y ACCIÓN RECOMENDADA en formato estructurado.`,
-    messages: messages.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
-  })
+Responde en español. Cuando generes campañas, incluye siempre: CAMPAÑA, SEGMENTO, CANAL, COPY, y ACCIÓN RECOMENDADA en formato estructurado.`
 
-  const text = response.content[0].type === "text" ? response.content[0].text : ""
-
-  return NextResponse.json({ reply: text })
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 2048,
+      system: fullSystem,
+      messages: messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    })
+    const text = response.content[0].type === "text" ? response.content[0].text : ""
+    return NextResponse.json({ reply: text })
+  } catch (e) {
+    console.error("[marketing/chat] Anthropic error:", e)
+    return NextResponse.json({ error: String(e) }, { status: 500 })
+  }
 }

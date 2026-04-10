@@ -47,7 +47,27 @@
       "Bash(SUPABASE_ACCESS_TOKEN=\"\" npx supabase:*)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\)\")",
       "Bash(git -C /Users/gabrielrodriguez/Projects/dn-clinic-app remote -v)",
-      "Bash(git -C /Users/gabrielrodriguez/Projects/dn-clinic-app status --short)"
+      "Bash(git -C /Users/gabrielrodriguez/Projects/dn-clinic-app status --short)",
+      "Bash(git commit -m 'fix: add '\\\\''use client'\\\\'' to offline page to fix event handler build error:*)",
+      "Bash(git commit -m 'fix: guard middleware against missing Supabase env vars:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(git commit:*)",
+      "Bash(npx vercel:*)",
+      "Bash(PGPASSWORD=Bicicleta95@ psql:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Status:', d['status']\\); r=d.get\\('result',{}\\); print\\('Nombre:', r.get\\('name'\\)\\); print\\('Rating:', r.get\\('rating'\\)\\); print\\('Total reseñas:', r.get\\('user_ratings_total'\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(python3 -c ':*)",
+      "Bash(grep:*)",
+      "Read(//Users/gabrielrodriguez/Desktop/mktg-complete/**)",
+      "Read(//Users/gabrielrodriguez/Desktop/KB. DIGITAL MARKETING/**)",
+      "Bash(npx tsx:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); tables=sorted\\([p.lstrip\\('/'\\) for p in data['paths'].keys\\(\\) if p != '/']\\); print\\('\\\\n'.join\\(tables\\)\\)\")",
+      "Bash(gh run:*)",
+      "Bash(vercel:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); jobs=d.get\\('jobs',[]\\); print\\(f'Jobs existentes: {len\\(jobs\\)}'\\); [print\\(f'  - {j[\\\\\"title\\\\\"]} \\(id:{j[\\\\\"jobId\\\\\"]}\\)'\\) for j in jobs]\")",
+      "Bash(brew install:*)",
+      "Bash(/opt/homebrew/opt/libpq/bin/psql --version)"
     ]
   }
 }

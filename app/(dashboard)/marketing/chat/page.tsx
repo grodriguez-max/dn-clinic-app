@@ -48,9 +48,11 @@ export default function MarketingChatPage() {
       const data = await res.json()
       if (data.reply) {
         setMessages((prev) => [...prev, { role: "assistant", content: data.reply }])
+      } else if (data.error) {
+        setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${data.error}` }])
       }
     } catch (e) {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Error al conectar con el agente. Intentá de nuevo." }])
+      setMessages((prev) => [...prev, { role: "assistant", content: `Error al conectar con el agente: ${String(e)}` }])
     } finally {
       setLoading(false)
     }

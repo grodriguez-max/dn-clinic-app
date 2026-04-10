@@ -76,6 +76,96 @@ async function runCronJob(job: string): Promise<unknown> {
       return { processed: results.length, appointments: results }
     }
 
+    // ── F6a. Recordatorio 24h antes (nuevo — usa reminder_24h_sent) ──────
+    case "reminder_24h": {
+      const now = new Date()
+      const in24 = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+      const windowStart = new Date(in24); windowStart.setMinutes(0, 0, 0)
+      const windowEnd   = new Date(in24); windowEnd.setMinutes(59, 59, 999)
+
+      const { data: appts } = await supabase
+        .from("appointments")
+        .select("id, patient_id, clinic_id, start_time, confirmation_token, patients(name, phone), services(name), professionals(name)")
+        .in("status", ["pending", "confirmed"])
+        .eq("reminder_24h_sent", false)
+        .gte("start_time", windowStart.toISOString())
+        .lte("start_time", windowEnd.toISOString())
+
+      const results = []
+      for (const appt of (appts ?? [])) {
+        const patient = appt.patients as { name: string; phone: string } | null
+        const service = appt.services as { name: string } | null
+        const prof    = appt.professionals as { name: string } | null
+        if (!patient?.phone) continue
+
+        const time    = formatTime(new Date(appt.start_time))
+        const dayName = formatDayName(new Date(appt.start_time))
+        const confirmUrl = process.env.NEXT_PUBLIC_APP_URL
+          ? `${process.env.NEXT_PUBLIC_APP_URL}/cita/${appt.confirmation_token}`
+          : null
+        const message = `Hola ${patient.name} 👋 Te recordamos que mañana, ${dayName} a las ${time}, tenés tu cita de *${service?.name}* con *${prof?.name}*.\n\n`
+          + (confirmUrl ? `✅ Confirmá tu asistencia aquí: ${confirmUrl}\n\n` : "")
+          + `Si necesitás cancelar, escribinos aquí. ¡Te esperamos!`
+
+        const whatsappUrl = process.env.WHATSAPP_SERVER_URL
+        if (whatsappUrl) {
+          try {
+            await fetch(`${whatsappUrl}/send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ to: patient.phone, message }),
+            })
+          } catch {}
+        }
+        await supabase.from("appointments").update({ reminder_24h_sent: true }).eq("id", appt.id)
+        results.push({ appointment_id: appt.id, patient: patient.name })
+      }
+      return { processed: results.length, appointments: results }
+    }
+
+    // ── F6b. Recordatorio 1h antes (nuevo — usa reminder_1h_sent) ────────
+    case "reminder_1h": {
+      const now = new Date()
+      const in1h = new Date(now.getTime() + 60 * 60 * 1000)
+      const windowStart = new Date(in1h); windowStart.setMinutes(in1h.getMinutes() - 10)
+      const windowEnd   = new Date(in1h); windowEnd.setMinutes(in1h.getMinutes() + 10)
+
+      const { data: appts } = await supabase
+        .from("appointments")
+        .select("id, clinic_id, start_time, patients(name, phone), clinics(address), services(name)")
+        .in("status", ["confirmed"])
+        .eq("reminder_1h_sent", false)
+        .gte("start_time", windowStart.toISOString())
+        .lte("start_time", windowEnd.toISOString())
+
+      const results = []
+      for (const appt of (appts ?? [])) {
+        const patient = appt.patients as { name: string; phone: string } | null
+        const clinic  = appt.clinics as { address: string } | null
+        const service = appt.services as { name: string } | null
+        if (!patient?.phone) continue
+
+        const time    = formatTime(new Date(appt.start_time))
+        const message = `⏰ Hola ${patient.name}, tu cita de *${service?.name}* es en 1 hora a las ${time}.`
+          + (clinic?.address ? ` 📍 ${clinic.address}` : "")
+          + ` ¡Te esperamos!`
+
+        const whatsappUrl = process.env.WHATSAPP_SERVER_URL
+        if (whatsappUrl) {
+          try {
+            await fetch(`${whatsappUrl}/send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ to: patient.phone, message }),
+            })
+          } catch {}
+        }
+        await supabase.from("appointments").update({ reminder_1h_sent: true }).eq("id", appt.id)
+        results.push({ appointment_id: appt.id, patient: patient.name })
+      }
+      return { processed: results.length }
+    }
+
     // ── 2. Recordatorio 2h antes ────────────────────────────────────────
     case "reminder_2h": {
       const now = new Date()

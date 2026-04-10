@@ -44,6 +44,8 @@ export interface AppointmentInput {
   end_time: string     // ISO string UTC
   notes?: string
   room_id?: string
+  recurrence_rule?: string
+  parent_appt_id?: string
 }
 
 export async function createAppointment(
@@ -75,7 +77,7 @@ export async function createAppointment(
       status: "confirmed",
       created_by: "web",
     })
-    .select("id")
+    .select("id, confirmation_token")
     .single()
 
   if (error) return { error: error.message }
@@ -96,14 +98,18 @@ export async function createAppointment(
       const apptDate = new Date(input.start_time)
       const dateStr = apptDate.toLocaleDateString("es-CR", { weekday: "long", day: "numeric", month: "long" })
       const timeStr = apptDate.toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" })
+      const confirmUrl = process.env.NEXT_PUBLIC_APP_URL && data.confirmation_token
+        ? `\n\n✅ Confirmá tu asistencia: ${process.env.NEXT_PUBLIC_APP_URL}/cita/${data.confirmation_token}`
+        : ""
       const message =
         `Hola ${patient.name} 👋\n\n` +
         `Te confirmamos tu cita en nuestra clínica:\n\n` +
         `📅 *Fecha:* ${dateStr}\n` +
         `⏰ *Hora:* ${timeStr}\n` +
         `💆 *Servicio:* ${svc?.name ?? "—"}\n` +
-        `👩‍⚕️ *Profesional:* ${prof?.name ?? "—"}\n\n` +
-        `Si necesitás cancelar o reagendar, escribinos aquí mismo. ¡Te esperamos! ✨`
+        `👩‍⚕️ *Profesional:* ${prof?.name ?? "—"}` +
+        confirmUrl +
+        `\n\nSi necesitás cancelar o reagendar, escribinos aquí mismo. ¡Te esperamos! ✨`
 
       // Send via WhatsApp server
       const whatsappUrl = process.env.WHATSAPP_SERVER_URL
@@ -274,8 +280,87 @@ export async function updateAppointment(
 }
 
 export async function cancelAppointment(appointmentId: string, reason?: string) {
-  return updateAppointment(appointmentId, {
+  const result = await updateAppointment(appointmentId, {
     status: "cancelled",
     cancellation_reason: reason ?? "Cancelado desde agenda",
   })
+  if (result.ok) void notifyWaitlistOnCancellation(appointmentId)
+  return result
+}
+
+async function notifyWaitlistOnCancellation(appointmentId: string) {
+  const service = createServiceClient()
+  const { data: appt } = await service
+    .from("appointments")
+    .select("clinic_id, professional_id, service_id, start_time")
+    .eq("id", appointmentId)
+    .single()
+  if (!appt) return
+
+  const { data: waiters } = await service
+    .from("waitlist")
+    .select("id, patient_id, patients(name,phone)")
+    .eq("clinic_id", appt.clinic_id)
+    .eq("service_id", appt.service_id)
+    .eq("status", "waiting")
+    .order("created_at")
+    .limit(1)
+
+  if (!waiters?.length) return
+  const first = waiters[0]
+  const patient = first.patients as unknown as { name: string; phone: string } | null
+  if (!patient?.phone) return
+
+  const whatsappUrl = process.env.WHATSAPP_SERVER_URL
+  if (whatsappUrl) {
+    const date = new Date(appt.start_time).toLocaleDateString("es-CR", {
+      weekday: "long", day: "numeric", month: "long", timeZone: "America/Costa_Rica",
+    })
+    const time = new Date(appt.start_time).toLocaleTimeString("es-CR", {
+      hour: "2-digit", minute: "2-digit", timeZone: "America/Costa_Rica",
+    })
+    const message = `Hola ${patient.name} 🎉 ¡Buenas noticias! Se liberó un espacio el ${date} a las ${time}. ¿Lo querés? Respondé *SÍ* y te confirmamos la cita.`
+    try {
+      await fetch(`${whatsappUrl}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: patient.phone, message }),
+      })
+    } catch {}
+  }
+
+  await service.from("waitlist").update({ status: "notified" }).eq("id", first.id)
+}
+
+export async function createRecurringAppointments(
+  clinicId: string,
+  baseInput: AppointmentInput,
+  rule: "weekly" | "biweekly" | "monthly",
+  count: number,
+  notifyWhatsApp = false
+): Promise<{ ok?: boolean; error?: string; ids?: string[] }> {
+  const intervalDays = rule === "weekly" ? 7 : rule === "biweekly" ? 14 : 30
+  const ids: string[] = []
+
+  for (let i = 0; i < count; i++) {
+    const offsetMs = i * intervalDays * 24 * 60 * 60 * 1000
+    const start = new Date(new Date(baseInput.start_time).getTime() + offsetMs).toISOString()
+    const end   = new Date(new Date(baseInput.end_time).getTime()   + offsetMs).toISOString()
+
+    const res = await createAppointment(
+      clinicId,
+      {
+        ...baseInput,
+        start_time: start,
+        end_time: end,
+        recurrence_rule: rule,
+        parent_appt_id: ids.length > 0 ? ids[0] : undefined,
+      },
+      i === 0 ? notifyWhatsApp : false
+    )
+    if (res.error) return { error: res.error }
+    ids.push(res.id!)
+  }
+
+  return { ok: true, ids }
 }

@@ -1,39 +1,44 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { format, addDays, startOfWeek, isSameDay } from "date-fns"
+import { addDays, startOfWeek, isSameDay, format } from "date-fns"
 import { es } from "date-fns/locale"
-import { ChevronLeft, ChevronRight, Plus, Calendar } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Lock, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { AppointmentModal, type ModalAppointment } from "./appointment-modal"
+import { TimeBlockModal } from "./time-block-modal"
+import { WaitlistPanel } from "./waitlist-panel"
+import { updateAppointment } from "./actions"
 
-// ---------- constants ----------
-const HOUR_HEIGHT = 56   // px per hour
-const DAY_START   = 7    // 7:00 AM
-const DAY_END     = 22   // 10:00 PM
-const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => DAY_START + i)
+// ─── Constants ────────────────────────────────────────────────────────
+const HOUR_HEIGHT  = 64        // px per hour
+const DAY_START    = 7         // 07:00
+const DAY_END      = 22        // 22:00
+const WORK_START   = 8         // shading before 8am
+const WORK_END     = 19        // shading after 7pm
+const HOURS        = Array.from({ length: DAY_END - DAY_START }, (_, i) => DAY_START + i)
 
-// Soft palette per professional index
+type ViewMode = "day" | "week" | "month"
+
+// ─── Color palette ────────────────────────────────────────────────────
 const PROF_COLORS = [
-  "bg-blue-100 border-blue-300 text-blue-800",
-  "bg-violet-100 border-violet-300 text-violet-800",
-  "bg-emerald-100 border-emerald-300 text-emerald-800",
-  "bg-amber-100 border-amber-300 text-amber-800",
-  "bg-pink-100 border-pink-300 text-pink-800",
-  "bg-cyan-100 border-cyan-300 text-cyan-800",
+  { bg: "bg-blue-100",    border: "border-l-blue-500",    text: "text-blue-900",    dot: "bg-blue-500"    },
+  { bg: "bg-violet-100",  border: "border-l-violet-500",  text: "text-violet-900",  dot: "bg-violet-500"  },
+  { bg: "bg-emerald-100", border: "border-l-emerald-500", text: "text-emerald-900", dot: "bg-emerald-500" },
+  { bg: "bg-amber-100",   border: "border-l-amber-500",   text: "text-amber-900",   dot: "bg-amber-500"   },
+  { bg: "bg-rose-100",    border: "border-l-rose-500",    text: "text-rose-900",    dot: "bg-rose-500"    },
+  { bg: "bg-cyan-100",    border: "border-l-cyan-500",    text: "text-cyan-900",    dot: "bg-cyan-500"    },
+  { bg: "bg-orange-100",  border: "border-l-orange-500",  text: "text-orange-900",  dot: "bg-orange-500"  },
+  { bg: "bg-teal-100",    border: "border-l-teal-500",    text: "text-teal-900",    dot: "bg-teal-500"    },
 ]
 
-const STATUS_OVERLAY: Record<string, string> = {
-  cancelled: "opacity-40 line-through",
-  no_show:   "opacity-50",
-}
-
-// ---------- types ----------
+// ─── Types ────────────────────────────────────────────────────────────
 interface Professional { id: string; name: string; specialty: string }
 interface Service      { id: string; name: string; duration_minutes: number; price: number }
 interface Patient      { id: string; name: string; phone?: string }
+interface Room         { id: string; name: string; equipment: string[] }
 
 interface Appointment {
   id: string
@@ -49,7 +54,14 @@ interface Appointment {
   services:      { name: string; duration_minutes: number } | null
 }
 
-interface Room { id: string; name: string; equipment: string[] }
+interface TimeBlock {
+  id: string
+  professional_id: string
+  date: string        // YYYY-MM-DD
+  start_time: string  // HH:MM:SS
+  end_time: string    // HH:MM:SS
+  reason: string
+}
 
 interface Props {
   clinicId: string
@@ -59,85 +71,93 @@ interface Props {
   rooms?: Room[]
 }
 
-// ---------- overlap layout ----------
-// Returns colIndex (0-based) and totalCols for each appointment in a day,
-// so they can be positioned side-by-side without overlapping.
-function computeColumns(appts: Appointment[]): { appt: Appointment; colIndex: number; totalCols: number }[] {
-  if (appts.length === 0) return []
+interface ColumnedAppt { appt: Appointment; colIndex: number; totalCols: number }
 
-  const sorted = [...appts].sort(
-    (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-  )
+interface DragState {
+  apptId: string
+  origStart: string
+  durationMs: number
+  offsetMin: number  // where within the card the pointer grabbed, in minutes
+}
 
-  const colEnds: number[] = [] // tracks end-time (ms) of the last appt in each column
-  const indexed: { appt: Appointment; colIndex: number }[] = []
+// ─── Helpers ──────────────────────────────────────────────────────────
+function toCRDate(iso: string): Date {
+  return new Date(new Date(iso).getTime() - 6 * 60 * 60 * 1000)
+}
 
-  for (const appt of sorted) {
-    const startMs = new Date(appt.start_time).getTime()
-    const endMs   = new Date(appt.end_time).getTime()
+function toCRMinutes(iso: string): number {
+  const d = toCRDate(iso)
+  return d.getUTCHours() * 60 + d.getUTCMinutes()
+}
 
+function getNowCR(): number {
+  const d = new Date()
+  const cr = new Date(d.getTime() - 6 * 60 * 60 * 1000)
+  return cr.getUTCHours() * 60 + cr.getUTCMinutes()
+}
+
+function fmtTime(mins: number): string {
+  const h  = Math.floor(mins / 60)
+  const m  = mins % 60
+  const ap = h >= 12 ? "pm" : "am"
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h
+  return `${h12}:${String(m).padStart(2, "0")} ${ap}`
+}
+
+function pad(n: number) { return String(n).padStart(2, "0") }
+
+function getMonday(d: Date): Date {
+  return startOfWeek(d, { weekStartsOn: 1 })
+}
+
+function timeStrToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number)
+  return h * 60 + (m || 0)
+}
+
+function computeColumns(appts: Appointment[]): ColumnedAppt[] {
+  if (!appts.length) return []
+  const items = appts
+    .map(a => ({ appt: a, s: new Date(a.start_time).getTime(), e: new Date(a.end_time).getTime() }))
+    .sort((a, b) => a.s - b.s || b.e - a.e)
+
+  const groups: typeof items[] = []
+  for (const item of items) {
     let placed = false
-    for (let i = 0; i < colEnds.length; i++) {
-      if (colEnds[i] <= startMs) {
-        colEnds[i] = endMs
-        indexed.push({ appt, colIndex: i })
-        placed = true
-        break
-      }
+    for (const g of groups) {
+      if (g.some(x => item.s < x.e && item.e > x.s)) { g.push(item); placed = true; break }
     }
-    if (!placed) {
-      indexed.push({ appt, colIndex: colEnds.length })
-      colEnds.push(endMs)
-    }
+    if (!placed) groups.push([item])
   }
 
-  // For each appt, totalCols = how many appts overlap with it (including itself)
-  return indexed.map((r) => {
-    const sMs = new Date(r.appt.start_time).getTime()
-    const eMs = new Date(r.appt.end_time).getTime()
-    const totalCols = indexed.filter(({ appt }) => {
-      const s = new Date(appt.start_time).getTime()
-      const e = new Date(appt.end_time).getTime()
-      return s < eMs && e > sMs
-    }).length
-    return { ...r, totalCols }
-  })
+  const result: ColumnedAppt[] = []
+  for (const group of groups) {
+    const cols: (typeof items[0])[][] = []
+    for (const item of group) {
+      let placed = false
+      for (const col of cols) {
+        if (col[col.length - 1].e <= item.s) { col.push(item); placed = true; break }
+      }
+      if (!placed) cols.push([item])
+    }
+    const totalCols = cols.length
+    cols.forEach((col, colIndex) =>
+      col.forEach(item => result.push({ appt: item.appt, colIndex, totalCols }))
+    )
+  }
+  return result
 }
 
-// ---------- helpers ----------
-// CR = UTC-6
-function utcToCRMinutes(iso: string): number {
-  const d = new Date(iso)
-  const cr = new Date(d.getTime() - 6 * 60 * 60 * 1000)
-  return cr.getHours() * 60 + cr.getMinutes()
-}
-
-function isoToCRDate(iso: string): Date {
-  const d = new Date(iso)
-  return new Date(d.getTime() - 6 * 60 * 60 * 1000)
-}
-
-function crDateStr(d: Date): string {
-  const cr = new Date(d.getTime() - 6 * 60 * 60 * 1000)
-  return cr.toISOString().split("T")[0]
-}
-
-function minutesToTimeStr(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-}
-
-// ---------- component ----------
+// ─── Component ────────────────────────────────────────────────────────
 export function AgendaClient({ clinicId, professionals, services, patients, rooms = [] }: Props) {
-  // Week starting on Monday
-  const [weekStart, setWeekStart] = useState<Date>(() => {
-    const now = new Date()
-    return startOfWeek(now, { weekStartsOn: 1 })
-  })
-
+  const [view, setView]             = useState<ViewMode>("week")
+  const [anchorDate, setAnchorDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
   const [appointments, setAppointments] = useState<Appointment[]>([])
-  const [loading, setLoading] = useState(false)
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
+  const [loading, setLoading]       = useState(false)
+  const [profFilter, setProfFilter] = useState<string | null>(null)
+  const [nowMin, setNowMin]         = useState(getNowCR)
+
   const [modal, setModal] = useState<{
     open: boolean
     appointment: ModalAppointment | null
@@ -146,48 +166,129 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     prefillProfId?: string
   }>({ open: false, appointment: null })
 
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  const [blockModal, setBlockModal] = useState<{
+    open: boolean
+    prefillDate?: string
+    prefillProfId?: string
+  }>({ open: false })
 
-  const profColorMap = new Map(professionals.map((p, i) => [p.id, PROF_COLORS[i % PROF_COLORS.length]]))
+  const [waitlistOpen, setWaitlistOpen] = useState(false)
 
-  // Fetch appointments for the visible week
-  const fetchWeek = useCallback(async () => {
+  // Drag & drop
+  const dragRef     = useRef<DragState | null>(null)
+  const dragMoved   = useRef(false)
+  const [dragPos, setDragPos] = useState<{
+    apptId: string
+    day: Date
+    startMin: number  // CR minutes from midnight
+    profId?: string   // only set in ProfDayView
+  } | null>(null)
+
+  const gridRef   = useRef<HTMLDivElement>(null)
+  const supabase  = createClient()
+
+  const colorMap  = new Map(professionals.map((p, i) => [p.id, PROF_COLORS[i % PROF_COLORS.length]]))
+  const weekStart = getMonday(anchorDate)
+  const weekDays  = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  const today     = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
+
+  // Show professional columns in day view when no filter applied
+  const profDayMode = view === "day" && !profFilter && professionals.length > 1
+
+  // Tick every minute
+  useEffect(() => {
+    const t = setInterval(() => setNowMin(getNowCR()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Scroll to current time on view change
+  useEffect(() => {
+    if (gridRef.current && view !== "month") {
+      gridRef.current.scrollTop = Math.max(0, (nowMin - DAY_START * 60) / 60 * HOUR_HEIGHT - 120)
+    }
+  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Fetch ────────────────────────────────────────────────────────
+  const fetchAppts = useCallback(async () => {
     setLoading(true)
-    const supabase = createClient()
-    const start = new Date(`${format(weekStart, "yyyy-MM-dd")}T06:00:00.000Z`)
-    const end   = addDays(start, 7)
+    let fromStr: string, toStr: string
 
-    const { data } = await supabase
-      .from("appointments")
-      .select(`
-        id, start_time, end_time, status, notes, professional_id, service_id, patient_id,
-        patients ( name, phone ),
-        professionals ( name ),
-        services ( name, duration_minutes )
-      `)
-      .eq("clinic_id", clinicId)
-      .gte("start_time", start.toISOString())
-      .lt("start_time", end.toISOString())
-      .order("start_time")
+    if (view === "week") {
+      fromStr = format(weekStart, "yyyy-MM-dd")
+      toStr   = format(addDays(weekStart, 7), "yyyy-MM-dd")
+    } else if (view === "day") {
+      fromStr = format(anchorDate, "yyyy-MM-dd")
+      toStr   = format(addDays(anchorDate, 1), "yyyy-MM-dd")
+    } else {
+      const first = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1)
+      fromStr = format(getMonday(first), "yyyy-MM-dd")
+      toStr   = format(addDays(new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0), 7), "yyyy-MM-dd")
+    }
 
-    setAppointments((data ?? []) as unknown as Appointment[])
+    const [apptRes, blockRes] = await Promise.all([
+      supabase
+        .from("appointments")
+        .select("id, start_time, end_time, status, notes, professional_id, service_id, patient_id, patients(name,phone), professionals(name), services(name,duration_minutes)")
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${fromStr}T06:00:00.000Z`)
+        .lt("start_time",  `${toStr}T06:00:00.000Z`)
+        .order("start_time"),
+
+      supabase
+        .from("time_blocks")
+        .select("id, professional_id, date, start_time, end_time, reason")
+        .eq("clinic_id", clinicId)
+        .gte("date", fromStr)
+        .lte("date", toStr),
+    ])
+
+    setAppointments((apptRes.data ?? []) as unknown as Appointment[])
+    setTimeBlocks((blockRes.data ?? []) as TimeBlock[])
     setLoading(false)
-  }, [clinicId, weekStart])
+  }, [clinicId, view, anchorDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { fetchWeek() }, [fetchWeek])
+  useEffect(() => { fetchAppts() }, [fetchAppts])
 
-  function prevWeek() { setWeekStart((d) => addDays(d, -7)) }
-  function nextWeek() { setWeekStart((d) => addDays(d, 7)) }
-  function goToday()  { setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 })) }
+  // ─── Navigation ───────────────────────────────────────────────────
+  function goToday() { setAnchorDate(new Date(today)) }
+  function goNext()  { setAnchorDate(d => view === "day" ? addDays(d, 1) : view === "week" ? addDays(d, 7) : new Date(d.getFullYear(), d.getMonth() + 1, 1)) }
+  function goPrev()  { setAnchorDate(d => view === "day" ? addDays(d, -1) : view === "week" ? addDays(d, -7) : new Date(d.getFullYear(), d.getMonth() - 1, 1)) }
 
-  function openNew(date: Date, startMinutes: number, profId?: string) {
-    const snap = Math.round(startMinutes / 30) * 30  // snap to 30-min
+  function getTitle(): string {
+    if (view === "day")   return format(anchorDate, "EEEE, d 'de' MMMM yyyy", { locale: es })
+    if (view === "month") return format(anchorDate, "MMMM yyyy", { locale: es })
+    const end = addDays(weekStart, 6)
+    return weekStart.getMonth() === end.getMonth()
+      ? format(weekStart, "MMMM yyyy", { locale: es })
+      : `${format(weekStart, "MMM", { locale: es })} – ${format(end, "MMM yyyy", { locale: es })}`
+  }
+
+  // ─── Data helpers ─────────────────────────────────────────────────
+  function getDayAppts(day: Date) {
+    return appointments.filter(a => isSameDay(toCRDate(a.start_time), day))
+  }
+
+  function filterByProf(appts: Appointment[]) {
+    return profFilter ? appts.filter(a => a.professional_id === profFilter) : appts
+  }
+
+  function getDayBlocks(day: Date, profId?: string) {
+    const dateStr = format(day, "yyyy-MM-dd")
+    return timeBlocks.filter(b =>
+      b.date === dateStr && (!profId || b.professional_id === profId)
+    )
+  }
+
+  // ─── Modal helpers ────────────────────────────────────────────────
+  function openNew(day: Date, clickY?: number, prefillProfId?: string) {
+    const mins = clickY != null ? Math.floor(clickY / HOUR_HEIGHT * 60) + DAY_START * 60 : 9 * 60
+    const snap = Math.round(mins / 30) * 30
     setModal({
       open: true,
       appointment: null,
-      prefillDate: format(date, "yyyy-MM-dd"),
-      prefillTime: minutesToTimeStr(snap),
-      prefillProfId: profId,
+      prefillDate: format(day, "yyyy-MM-dd"),
+      prefillTime: `${pad(Math.floor(snap / 60))}:${pad(snap % 60)}`,
+      prefillProfId: prefillProfId ?? profFilter ?? undefined,
     })
   }
 
@@ -208,181 +309,618 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     })
   }
 
-  const today = new Date()
-  const isCurrentWeek = isSameDay(weekStart, startOfWeek(today, { weekStartsOn: 1 }))
+  // ─── Drag & Drop ──────────────────────────────────────────────────
+  function startDrag(appt: Appointment, e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation()
+    // Capture pointer on the grid container so we receive all move/up events
+    if (gridRef.current) gridRef.current.setPointerCapture(e.pointerId)
 
-  const monthLabel = format(weekStart, "MMMM yyyy", { locale: es })
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const offsetInCard = e.clientY - rect.top
+    const offsetMin = Math.max(0, offsetInCard / HOUR_HEIGHT * 60)
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* ---- Toolbar ---- */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={prevWeek}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={nextWeek}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-        </div>
-        <span className="text-sm font-semibold capitalize flex-1">{monthLabel}</span>
-        {!isCurrentWeek && (
-          <Button variant="outline" size="sm" onClick={goToday} className="h-8">
-            <Calendar className="w-3.5 h-3.5 mr-1.5" />
-            Hoy
-          </Button>
+    dragRef.current = {
+      apptId: appt.id,
+      origStart: appt.start_time,
+      durationMs: new Date(appt.end_time).getTime() - new Date(appt.start_time).getTime(),
+      offsetMin,
+    }
+    dragMoved.current = false
+  }
+
+  function handleGridPointerMove(e: React.PointerEvent<HTMLDivElement>, days: Date[], profIds?: string[]) {
+    if (!dragRef.current) return
+    e.preventDefault()
+    dragMoved.current = true
+
+    const gridEl = gridRef.current
+    if (!gridEl) return
+
+    const rect = gridEl.getBoundingClientRect()
+    const gutterW = 56
+    const cols  = profIds ?? days
+    const colW  = (rect.width - gutterW) / cols.length
+
+    const relX = e.clientX - rect.left - gutterW
+    const relY = e.clientY - rect.top + gridEl.scrollTop
+
+    const colIdx    = Math.max(0, Math.min(cols.length - 1, Math.floor(relX / colW)))
+    const rawMin    = relY / HOUR_HEIGHT * 60 + DAY_START * 60 - dragRef.current.offsetMin
+    const snapped   = Math.round(rawMin / 15) * 15
+    const durMin    = dragRef.current.durationMs / 60000
+    const clamped   = Math.max(DAY_START * 60, Math.min(DAY_END * 60 - durMin, snapped))
+
+    setDragPos({
+      apptId: dragRef.current.apptId,
+      day:    profIds ? days[0] : days[colIdx],
+      startMin: clamped,
+      profId: profIds ? profIds[colIdx] : undefined,
+    })
+  }
+
+  async function handleGridPointerUp() {
+    if (!dragRef.current) return
+    const dr = dragRef.current
+    dragRef.current = null
+
+    if (!dragMoved.current || !dragPos || dragPos.apptId !== dr.apptId) {
+      setDragPos(null)
+      return
+    }
+
+    const crDate   = format(dragPos.day, "yyyy-MM-dd")
+    const h        = Math.floor(dragPos.startMin / 60)
+    const m        = dragPos.startMin % 60
+    const newStart = new Date(`${crDate}T${pad(h)}:${pad(m)}:00-06:00`).toISOString()
+    const newEnd   = new Date(new Date(newStart).getTime() + dr.durationMs).toISOString()
+
+    const updates: Record<string, string> = { start_time: newStart, end_time: newEnd }
+    if (dragPos.profId) updates.professional_id = dragPos.profId
+
+    // Optimistic update
+    setAppointments(prev => prev.map(a =>
+      a.id === dr.apptId
+        ? { ...a, start_time: newStart, end_time: newEnd, ...(dragPos.profId ? { professional_id: dragPos.profId! } : {}) }
+        : a
+    ))
+    setDragPos(null)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await updateAppointment(dr.apptId, updates as any)
+    if (res.error) fetchAppts()  // revert on error
+  }
+
+  // ─── Appointment card ─────────────────────────────────────────────
+  function ApptCard({ appt, top, height, left, width }: {
+    appt: Appointment; top: number; height: number; left: string; width: string
+  }) {
+    const isDragging = dragPos?.apptId === appt.id
+    const displayTop = isDragging && dragPos
+      ? (dragPos.startMin - DAY_START * 60) / 60 * HOUR_HEIGHT
+      : top
+
+    const c    = colorMap.get(appt.professional_id) ?? PROF_COLORS[0]
+    const dur  = toCRMinutes(appt.end_time) - toCRMinutes(appt.start_time)
+    const grey = appt.status === "cancelled" || appt.status === "no_show"
+
+    return (
+      <div
+        data-appt
+        onPointerDown={e => startDrag(appt, e)}
+        onClick={e => {
+          e.stopPropagation()
+          if (!dragMoved.current) openEdit(appt)
+        }}
+        className={cn(
+          "absolute border-l-[3px] rounded-md overflow-hidden select-none",
+          "transition-shadow duration-150 hover:shadow-lg hover:z-30 hover:brightness-95",
+          isDragging ? "z-50 ring-2 ring-primary/30 cursor-grabbing shadow-xl" : "cursor-grab",
+          c.bg, c.border, c.text,
+          grey && "grayscale opacity-50",
+          appt.status === "pending" && "opacity-80",
         )}
-        <Button
-          size="sm"
-          className="h-8"
-          onClick={() => setModal({ open: true, appointment: null })}
-        >
-          <Plus className="w-4 h-4 mr-1.5" />
-          Nueva cita
-        </Button>
+        style={{ top: displayTop, height: Math.max(22, height - 2), left, width }}
+      >
+        <div className={cn("px-2 py-1 h-full", dur <= 30 ? "flex items-center gap-2" : "flex flex-col gap-0.5")}>
+          <p className={cn("font-semibold truncate leading-tight", dur <= 30 ? "text-[11px]" : "text-xs")}>
+            {appt.patients?.name ?? "—"}
+          </p>
+          <p className="text-[10px] opacity-70 truncate leading-tight">
+            {appt.services?.name ?? "—"}
+          </p>
+          {dur > 50 && (
+            <p className="text-[10px] opacity-55 truncate leading-tight">
+              {appt.professionals?.name ?? "—"}
+            </p>
+          )}
+          {dur > 75 && (
+            <p className="text-[10px] opacity-45 mt-auto">
+              {fmtTime(toCRMinutes(appt.start_time))} – {fmtTime(toCRMinutes(appt.end_time))}
+            </p>
+          )}
+        </div>
       </div>
+    )
+  }
 
-      {/* ---- Calendar grid ---- */}
-      <div className="flex-1 overflow-auto rounded-xl border border-border bg-white">
-        {/* Day headers */}
-        <div className="sticky top-0 z-20 bg-white border-b border-border flex">
-          <div className="w-14 shrink-0" /> {/* time gutter */}
-          {weekDays.map((day) => {
-            const isToday = isSameDay(day, today)
+  // ─── Time block chip ──────────────────────────────────────────────
+  function BlockChip({ block }: { block: TimeBlock }) {
+    const startMin = timeStrToMinutes(block.start_time)
+    const endMin   = timeStrToMinutes(block.end_time)
+    const top      = (startMin - DAY_START * 60) / 60 * HOUR_HEIGHT
+    const height   = (endMin - startMin) / 60 * HOUR_HEIGHT
+    return (
+      <div
+        data-block
+        className="absolute left-0 right-0 z-10 bg-gray-200/90 border border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer hover:bg-gray-300/90 transition-colors"
+        style={{ top, height: Math.max(18, height - 1) }}
+        onClick={e => {
+          e.stopPropagation()
+          setBlockModal({ open: true, prefillDate: block.date, prefillProfId: block.professional_id })
+        }}
+        title={`${block.reason} (${block.start_time.slice(0,5)}–${block.end_time.slice(0,5)})`}
+      >
+        <div className="flex items-center gap-1 px-1">
+          <Lock className="w-2.5 h-2.5 text-gray-500 shrink-0" />
+          {height > 24 && (
+            <span className="text-[10px] text-gray-500 font-medium truncate">{block.reason}</span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Working hours shade ──────────────────────────────────────────
+  function WorkingHoursShade() {
+    const totalH = HOURS.length * HOUR_HEIGHT
+    return (
+      <>
+        {WORK_START > DAY_START && (
+          <div
+            className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
+            style={{ top: 0, height: (WORK_START - DAY_START) * HOUR_HEIGHT }}
+          />
+        )}
+        {WORK_END < DAY_END && (
+          <div
+            className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
+            style={{ top: (WORK_END - DAY_START) * HOUR_HEIGHT, height: (DAY_END - WORK_END) * HOUR_HEIGHT }}
+          />
+        )}
+      </>
+    )
+  }
+
+  // ─── Shared column renderer ───────────────────────────────────────
+  function DayColumn({
+    day,
+    appts,
+    blocks,
+    isToday,
+    profId,
+    days,
+    profIds,
+  }: {
+    day: Date
+    appts: Appointment[]
+    blocks: TimeBlock[]
+    isToday: boolean
+    profId?: string
+    days: Date[]
+    profIds?: string[]
+  }) {
+    const totalH  = HOURS.length * HOUR_HEIGHT
+    const nowTop  = (nowMin - DAY_START * 60) / 60 * HOUR_HEIGHT
+    const showNow = isToday && nowMin >= DAY_START * 60 && nowMin < DAY_END * 60
+    const columned = computeColumns(appts)
+
+    return (
+      <div
+        className="flex-1 min-w-0 relative border-l border-border/25 cursor-pointer"
+        style={{ height: totalH }}
+        onClick={e => {
+          if ((e.target as HTMLElement).closest("[data-appt],[data-block]")) return
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+          openNew(day, e.clientY - rect.top, profId)
+        }}
+      >
+        {/* Hour + half-hour lines */}
+        {HOURS.map((_, i) => (
+          <div key={i} className="absolute left-0 right-0 pointer-events-none" style={{ top: i * HOUR_HEIGHT }}>
+            <div className="border-t border-border/20" />
+            <div className="border-t border-border/10 border-dashed" style={{ marginTop: HOUR_HEIGHT / 2 }} />
+          </div>
+        ))}
+
+        {/* Working hours shading */}
+        <WorkingHoursShade />
+
+        {/* Today tint */}
+        {isToday && <div className="absolute inset-0 bg-blue-500/[0.03] pointer-events-none" />}
+
+        {/* Time blocks */}
+        {blocks.map(b => <BlockChip key={b.id} block={b} />)}
+
+        {/* Current time line */}
+        {showNow && (
+          <div className="absolute left-0 right-0 z-20 pointer-events-none flex items-center" style={{ top: nowTop }}>
+            <div className="w-2 h-2 rounded-full bg-red-500 shrink-0 -ml-1" />
+            <div className="flex-1 h-px bg-red-400" />
+          </div>
+        )}
+
+        {/* Appointment blocks */}
+        {columned.map(({ appt, colIndex, totalCols }) => {
+          const sMin   = toCRMinutes(appt.start_time)
+          const eMin   = toCRMinutes(appt.end_time)
+          const top    = Math.max(0, (sMin - DAY_START * 60) / 60 * HOUR_HEIGHT)
+          const height = (eMin - sMin) / 60 * HOUR_HEIGHT
+          const colW   = (100 - 1) / totalCols
+          const left   = colIndex * colW + 0.5
+          return (
+            <ApptCard
+              key={appt.id}
+              appt={appt}
+              top={top}
+              height={height}
+              left={`${left}%`}
+              width={`${colW - 0.5}%`}
+            />
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ─── Shared time grid ─────────────────────────────────────────────
+  function TimeGrid({ days, profIds }: { days: Date[]; profIds?: string[] }) {
+    const totalH = HOURS.length * HOUR_HEIGHT
+    return (
+      <div
+        className="flex"
+        style={{ minHeight: totalH }}
+        onPointerMove={e => handleGridPointerMove(e, days, profIds)}
+        onPointerUp={handleGridPointerUp}
+        onPointerCancel={() => { dragRef.current = null; setDragPos(null) }}
+      >
+        {/* Time gutter */}
+        <div className="w-14 shrink-0 select-none relative">
+          {HOURS.map(h => (
+            <div key={h} className="relative" style={{ height: HOUR_HEIGHT }}>
+              <span className="absolute -top-[9px] right-2 text-[11px] text-muted-foreground/50 tabular-nums font-medium">
+                {pad(h)}:00
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Day columns */}
+        {days.map((day, di) => {
+          const profId   = profIds ? profIds[di] : undefined
+          const appts    = profId
+            ? getDayAppts(day).filter(a => a.professional_id === profId)
+            : filterByProf(getDayAppts(day))
+          const blocks   = getDayBlocks(day, profId)
+          const isToday  = isSameDay(day, today)
+          return (
+            <DayColumn
+              key={profId ?? day.toISOString()}
+              day={day}
+              appts={appts}
+              blocks={blocks}
+              isToday={isToday}
+              profId={profId}
+              days={days}
+              profIds={profIds}
+            />
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ─── Week view ────────────────────────────────────────────────────
+  const DAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+  function WeekView() {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="sticky top-0 z-10 bg-white border-b border-border/30 flex shrink-0">
+          <div className="w-14 shrink-0" />
+          {weekDays.map((day, i) => {
+            const isThisToday = isSameDay(day, today)
+            const count = filterByProf(getDayAppts(day)).filter(a => !["cancelled","no_show"].includes(a.status)).length
             return (
               <div
-                key={day.toISOString()}
-                className="flex-1 min-w-0 py-2.5 text-center border-l border-border first:border-l-0"
+                key={i}
+                className="flex-1 min-w-0 py-2.5 flex flex-col items-center gap-0.5 cursor-pointer hover:bg-muted/20 transition-colors border-l border-border/20 first:border-l-0"
+                onClick={() => { setAnchorDate(day); setView("day") }}
               >
-                <p className={cn("text-[11px] font-medium uppercase tracking-wide", isToday ? "text-primary" : "text-muted-foreground")}>
-                  {format(day, "EEE", { locale: es })}
-                </p>
-                <p className={cn(
-                  "text-lg font-semibold leading-tight mt-0.5 mx-auto w-8 h-8 flex items-center justify-center rounded-full",
-                  isToday && "bg-primary text-white"
+                <span className={cn("text-[10px] font-bold uppercase tracking-widest", isThisToday ? "text-blue-500" : "text-muted-foreground/60")}>
+                  {DAY_SHORT[i]}
+                </span>
+                <span className={cn(
+                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors",
+                  isThisToday ? "bg-blue-600 text-white" : "text-foreground hover:bg-muted"
                 )}>
                   {format(day, "d")}
-                </p>
+                </span>
+                {count > 0 && (
+                  <div className="flex gap-px items-center">
+                    {[...Array(Math.min(count, 4))].map((_, j) => (
+                      <div key={j} className="w-1 h-1 rounded-full bg-blue-400" />
+                    ))}
+                    {count > 4 && <span className="text-[9px] text-muted-foreground">+{count - 4}</span>}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+        <div className="flex-1 overflow-y-auto" ref={gridRef}>
+          <TimeGrid days={weekDays} />
+        </div>
+      </div>
+    )
+  }
 
-        {/* Scrollable time grid */}
-        <div className="flex relative">
-          {/* Time gutter */}
-          <div className="w-14 shrink-0 select-none">
-            {HOURS.map((h) => (
-              <div
-                key={h}
-                className="relative text-right pr-2"
-                style={{ height: HOUR_HEIGHT }}
-              >
-                <span className="absolute -top-2.5 right-2 text-[10px] text-muted-foreground tabular-nums">
-                  {String(h).padStart(2, "0")}:00
-                </span>
+  // ─── Day view (single column or per-professional columns) ─────────
+  function DayView() {
+    const isThisToday = isSameDay(anchorDate, today)
+    const count = (profDayMode
+      ? getDayAppts(anchorDate)
+      : filterByProf(getDayAppts(anchorDate))
+    ).filter(a => !["cancelled","no_show"].includes(a.status)).length
+
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-white border-b border-border/30 shrink-0">
+          {profDayMode ? (
+            /* Professional columns header */
+            <div className="flex">
+              <div className="w-14 shrink-0 flex items-end pb-2 pl-2">
+                <div className={cn(
+                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
+                  isThisToday ? "bg-blue-600 text-white" : "bg-muted text-foreground"
+                )}>
+                  {format(anchorDate, "d")}
+                </div>
               </div>
-            ))}
+              {professionals.map(prof => {
+                const c = colorMap.get(prof.id) ?? PROF_COLORS[0]
+                const profCount = getDayAppts(anchorDate).filter(a =>
+                  a.professional_id === prof.id && !["cancelled","no_show"].includes(a.status)
+                ).length
+                return (
+                  <div key={prof.id} className="flex-1 min-w-0 py-2.5 flex flex-col items-center gap-0.5 border-l border-border/20 first:border-l-0">
+                    <div className={cn("w-2.5 h-2.5 rounded-full", c.dot)} />
+                    <span className="text-[11px] font-semibold text-foreground truncate px-1">
+                      {prof.name.split(" ")[0]}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{profCount} {profCount === 1 ? "cita" : "citas"}</span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            /* Single day header */
+            <div className="flex items-center gap-3 px-4 py-2.5">
+              <div className={cn(
+                "w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold shrink-0",
+                isThisToday ? "bg-blue-600 text-white" : "bg-muted text-foreground"
+              )}>
+                {format(anchorDate, "d")}
+              </div>
+              <div>
+                <p className={cn("text-sm font-semibold capitalize", isThisToday && "text-blue-600")}>
+                  {format(anchorDate, "EEEE d 'de' MMMM", { locale: es })}
+                </p>
+                <p className="text-xs text-muted-foreground">{count} {count === 1 ? "cita" : "citas"}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto" ref={gridRef}>
+          {profDayMode ? (
+            <TimeGrid
+              days={professionals.map(() => anchorDate)}
+              profIds={professionals.map(p => p.id)}
+            />
+          ) : (
+            <TimeGrid days={[anchorDate]} />
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Month view ───────────────────────────────────────────────────
+  function MonthView() {
+    const y     = anchorDate.getFullYear()
+    const m     = anchorDate.getMonth()
+    const first = new Date(y, m, 1)
+    const last  = new Date(y, m + 1, 0)
+    const gStart = getMonday(first)
+    const rows  = Math.ceil((last.getDate() + (first.getDay() === 0 ? 6 : first.getDay() - 1)) / 7)
+    const days  = Array.from({ length: rows * 7 }, (_, i) => addDays(gStart, i))
+
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="grid grid-cols-7 border-b border-border/30 bg-white sticky top-0 z-10 shrink-0">
+          {DAY_SHORT.map(d => (
+            <div key={d} className="py-2 text-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+              {d}
+            </div>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-7 divide-x divide-y divide-border/20">
+            {days.map((day, i) => {
+              const inMonth     = day.getMonth() === m
+              const isThisToday = isSameDay(day, today)
+              const dayAppts    = filterByProf(getDayAppts(day)).filter(a => !["cancelled","no_show"].includes(a.status))
+              const MAX = 3
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "min-h-[96px] p-1.5 cursor-pointer transition-colors hover:bg-blue-50/40",
+                    !inMonth && "bg-muted/5",
+                  )}
+                  onClick={() => { setAnchorDate(day); setView("day") }}
+                >
+                  <div className={cn(
+                    "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold mb-1 mx-auto",
+                    isThisToday ? "bg-blue-600 text-white" : inMonth ? "text-foreground" : "text-muted-foreground/25"
+                  )}>
+                    {format(day, "d")}
+                  </div>
+                  <div className="space-y-px">
+                    {dayAppts.slice(0, MAX).map(a => {
+                      const c = colorMap.get(a.professional_id) ?? PROF_COLORS[0]
+                      return (
+                        <div
+                          key={a.id}
+                          className={cn("rounded text-[10px] px-1.5 py-px truncate font-medium leading-relaxed", c.bg, c.text)}
+                          onClick={e => { e.stopPropagation(); openEdit(a) }}
+                        >
+                          {fmtTime(toCRMinutes(a.start_time))} · {a.patients?.name ?? "—"}
+                        </div>
+                      )
+                    })}
+                    {dayAppts.length > MAX && (
+                      <p className="text-[10px] text-muted-foreground/70 pl-1">+{dayAppts.length - MAX} más</p>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
+        </div>
+      </div>
+    )
+  }
 
-          {/* Day columns */}
-          {weekDays.map((day) => {
-            const dayAppts = appointments.filter((a) => {
-              const crDate = isoToCRDate(a.start_time)
-              return isSameDay(crDate, day)
-            })
+  // ─── Render ───────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col h-full bg-white rounded-xl border border-border/40 shadow-sm overflow-hidden">
 
-            return (
-              <div
-                key={day.toISOString()}
-                className="flex-1 min-w-0 border-l border-border relative"
-                style={{ height: HOUR_HEIGHT * HOURS.length }}
-                onClick={(e) => {
-                  // Click on empty area → new appointment
-                  if ((e.target as HTMLElement).closest("[data-appt]")) return
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                  const y = e.clientY - rect.top
-                  const minutes = Math.floor((y / HOUR_HEIGHT) * 60) + DAY_START * 60
-                  openNew(day, minutes)
-                }}
-              >
-                {/* Hour lines */}
-                {HOURS.map((h, i) => (
-                  <div
-                    key={h}
-                    className="absolute left-0 right-0 border-t border-border/40"
-                    style={{ top: i * HOUR_HEIGHT }}
-                  />
-                ))}
-                {/* Half-hour lines */}
-                {HOURS.map((h, i) => (
-                  <div
-                    key={`${h}-half`}
-                    className="absolute left-0 right-0 border-t border-border/20 border-dashed"
-                    style={{ top: i * HOUR_HEIGHT + HOUR_HEIGHT / 2 }}
-                  />
-                ))}
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30 shrink-0 flex-wrap gap-y-2">
 
-                {/* Appointments — positioned side-by-side when overlapping */}
-                {computeColumns(dayAppts).map(({ appt, colIndex, totalCols }) => {
-                  const startMin  = utcToCRMinutes(appt.start_time)
-                  const endMin    = utcToCRMinutes(appt.end_time)
-                  const top       = Math.max(0, (startMin - DAY_START * 60) / 60 * HOUR_HEIGHT)
-                  const height    = Math.max(20, (endMin - startMin) / 60 * HOUR_HEIGHT - 2)
-                  const colWidth  = 100 / totalCols
-                  const leftPct   = colIndex * colWidth
-                  const colorClass = profColorMap.get(appt.professional_id) ?? PROF_COLORS[0]
-                  const overlay    = STATUS_OVERLAY[appt.status] ?? ""
-                  const svcName    = appt.services?.name ?? "Servicio"
-                  const patName    = appt.patients?.name ?? "Paciente"
-                  const profName   = appt.professionals?.name ?? ""
+        {/* Navigation */}
+        <div className="flex items-center gap-0.5">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goPrev}>
+            <ChevronLeft className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goNext}>
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs ml-1 font-medium" onClick={goToday}>
+            Hoy
+          </Button>
+        </div>
 
-                  return (
-                    <div
-                      key={appt.id}
-                      data-appt="true"
-                      onClick={(e) => { e.stopPropagation(); openEdit(appt) }}
-                      className={cn(
-                        "absolute rounded-md border px-1.5 py-1 cursor-pointer",
-                        "hover:brightness-95 transition-all overflow-hidden select-none",
-                        colorClass,
-                        overlay,
-                      )}
-                      style={{
-                        top,
-                        height,
-                        left: `${leftPct + 0.5}%`,
-                        width: `${colWidth - 1}%`,
-                      }}
-                    >
-                      <p className="text-[11px] font-semibold leading-tight truncate">{patName}</p>
-                      {height > 30 && (
-                        <p className="text-[10px] leading-tight truncate opacity-80">{svcName}</p>
-                      )}
-                      {height > 46 && profName && (
-                        <p className="text-[10px] leading-tight truncate opacity-70">{profName}</p>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })}
+        {/* Title */}
+        <h2 className="text-sm font-semibold capitalize flex items-center gap-2 min-w-[170px]">
+          {getTitle()}
+          {loading && (
+            <span className="w-3.5 h-3.5 rounded-full border-2 border-primary/40 border-t-primary animate-spin inline-block shrink-0" />
+          )}
+        </h2>
+
+        <div className="flex-1" />
+
+        {/* Professional filter chips */}
+        {professionals.length > 0 && (
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 max-w-xs shrink-0">
+            <button
+              onClick={() => setProfFilter(null)}
+              className={cn(
+                "shrink-0 px-2.5 py-1 rounded-full text-xs font-medium transition-all",
+                !profFilter ? "bg-foreground text-background shadow-sm" : "bg-muted text-muted-foreground hover:bg-muted/70"
+              )}
+            >
+              Todos
+            </button>
+            {professionals.map(p => {
+              const c = colorMap.get(p.id) ?? PROF_COLORS[0]
+              const active = profFilter === p.id
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setProfFilter(active ? null : p.id)}
+                  className={cn(
+                    "shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap",
+                    active ? cn(c.bg, c.text, "shadow-sm") : "bg-muted text-muted-foreground hover:bg-muted/70"
+                  )}
+                >
+                  <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", c.dot)} />
+                  {p.name.split(" ")[0]}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* View switcher */}
+        <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+          {(["day", "week", "month"] as ViewMode[]).map(v => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium transition-colors border-l border-border/50 first:border-l-0",
+                view === v ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted/40"
+              )}
+            >
+              {v === "day" ? "Día" : v === "week" ? "Semana" : "Mes"}
+            </button>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => setBlockModal({ open: true, prefillDate: format(anchorDate, "yyyy-MM-dd") })}
+          >
+            <Lock className="w-3.5 h-3.5 mr-1" />
+            Bloquear
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => setWaitlistOpen(true)}
+          >
+            <Clock className="w-3.5 h-3.5 mr-1" />
+            Espera
+          </Button>
+          <Button size="sm" className="h-8" onClick={() => openNew(anchorDate)}>
+            <Plus className="w-4 h-4 mr-1.5" />
+            Nueva cita
+          </Button>
         </div>
       </div>
 
-      {/* Loading overlay */}
-      {loading && (
-        <div className="absolute inset-0 bg-white/60 flex items-center justify-center rounded-xl pointer-events-none">
-          <p className="text-sm text-muted-foreground animate-pulse">Cargando citas...</p>
-        </div>
-      )}
+      {/* Calendar content */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {view === "week"  && <WeekView />}
+        {view === "day"   && <DayView />}
+        {view === "month" && <MonthView />}
+      </div>
 
-      {/* Modal */}
+      {/* Appointment modal */}
       <AppointmentModal
         open={modal.open}
-        onClose={() => setModal((m) => ({ ...m, open: false }))}
-        onSaved={fetchWeek}
+        onClose={() => setModal(m => ({ ...m, open: false }))}
+        onSaved={fetchAppts}
         clinicId={clinicId}
         appointment={modal.appointment}
         professionals={professionals}
@@ -392,6 +930,28 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
         prefillDate={modal.prefillDate}
         prefillTime={modal.prefillTime}
         prefillProfId={modal.prefillProfId}
+      />
+
+      {/* Time block modal */}
+      <TimeBlockModal
+        open={blockModal.open}
+        onClose={() => setBlockModal(m => ({ ...m, open: false }))}
+        onSaved={fetchAppts}
+        clinicId={clinicId}
+        professionals={professionals}
+        prefillDate={blockModal.prefillDate}
+        prefillProfId={blockModal.prefillProfId}
+        existingBlocks={timeBlocks}
+      />
+
+      {/* Waitlist panel */}
+      <WaitlistPanel
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        clinicId={clinicId}
+        professionals={professionals}
+        services={services}
+        patients={patients}
       />
     </div>
   )

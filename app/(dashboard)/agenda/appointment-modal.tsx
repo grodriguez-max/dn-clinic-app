@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { createAppointment, updateAppointment, cancelAppointment } from "./actions"
+import { createAppointment, updateAppointment, cancelAppointment, createRecurringAppointments } from "./actions"
 import { getPatientActivePackages } from "@/app/(dashboard)/servicios/package-actions"
 import { registerAppointmentPayment, getAppointmentPayments } from "./payment-actions"
 import { format } from "date-fns"
@@ -101,6 +101,9 @@ export function AppointmentModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [notifyWhatsApp, setNotifyWhatsApp] = useState(true)
+  const [isRecurring, setIsRecurring] = useState(false)
+  const [recurrenceRule, setRecurrenceRule] = useState<"weekly" | "biweekly" | "monthly">("weekly")
+  const [recurrenceCount, setRecurrenceCount] = useState(4)
   const [activePackage, setActivePackage] = useState<{ id: string; name: string; sessions_used: number; sessions_total: number } | null>(null)
   const [payments, setPayments] = useState<Array<{ id: string; amount: number; payment_type: string; payment_method: string; paid_at: string }>>([])
   const [showPaymentForm, setShowPaymentForm] = useState(false)
@@ -130,6 +133,9 @@ export function AppointmentModal({
       setNotes("")
       setStatus("confirmed")
       setPatientSearch("")
+      setIsRecurring(false)
+      setRecurrenceRule("weekly")
+      setRecurrenceCount(4)
     }
     setError("")
   }, [open, isEdit])
@@ -200,6 +206,17 @@ export function AppointmentModal({
           notes: notes || undefined,
           status,
         })
+        if (res.error) { setError(res.error); return }
+      } else if (isRecurring) {
+        const res = await createRecurringAppointments(clinicId, {
+          patient_id: patientId,
+          professional_id: profId,
+          service_id: serviceId,
+          start_time: startUtc,
+          end_time: endUtc,
+          notes: notes || undefined,
+          room_id: roomId || undefined,
+        }, recurrenceRule, recurrenceCount, notifyWhatsApp)
         if (res.error) { setError(res.error); return }
       } else {
         const res = await createAppointment(clinicId, {
@@ -503,6 +520,44 @@ export function AppointmentModal({
                     >
                       Registrar
                     </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recurrence — only for new appointments */}
+          {!isEdit && (
+            <div className="space-y-2 pt-1 border-t border-border">
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                <div>
+                  <p className="text-sm font-medium">Cita recurrente</p>
+                  <p className="text-xs text-muted-foreground">Crear múltiples citas automáticamente</p>
+                </div>
+                <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
+              </div>
+              {isRecurring && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Frecuencia</Label>
+                    <Select value={recurrenceRule} onValueChange={v => setRecurrenceRule(v as typeof recurrenceRule)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Semanal</SelectItem>
+                        <SelectItem value="biweekly">Quincenal</SelectItem>
+                        <SelectItem value="monthly">Mensual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Sesiones ({recurrenceCount})</Label>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={12}
+                      value={recurrenceCount}
+                      onChange={e => setRecurrenceCount(Math.max(2, Math.min(12, parseInt(e.target.value) || 2)))}
+                    />
                   </div>
                 </div>
               )}

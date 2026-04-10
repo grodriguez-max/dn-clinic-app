@@ -28,17 +28,28 @@ export default function MarketingCalendarPage() {
   const [loading, setLoading] = useState(false)
   const [expandedPost, setExpandedPost] = useState<number | null>(null)
   const [generated, setGenerated] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function generateCalendar() {
     setLoading(true)
     setGenerated(false)
+    setError(null)
     try {
       const res = await fetch("/api/marketing/calendar", { method: "POST" })
       const data = await res.json()
-      setPosts((data.posts as ContentPost[]).map((p) => ({ ...p, status: "draft" })))
+      if (!res.ok) {
+        setError(data.error ?? `Error ${res.status}`)
+        return
+      }
+      const list = Array.isArray(data.posts) ? data.posts : []
+      if (list.length === 0) {
+        setError("El agente no devolvió posts. Intentá de nuevo.")
+        return
+      }
+      setPosts(list.map((p: ContentPost) => ({ ...p, status: "draft" })))
       setGenerated(true)
-    } catch {
-      setPosts([])
+    } catch (err) {
+      setError(String(err))
     } finally {
       setLoading(false)
     }
@@ -77,6 +88,12 @@ export default function MarketingCalendarPage() {
           </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {!generated && !loading && (
         <div className="bg-white border border-border rounded-xl p-12 text-center">

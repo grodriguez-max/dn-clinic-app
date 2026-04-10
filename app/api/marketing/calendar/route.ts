@@ -18,17 +18,24 @@ export async function POST(req: NextRequest) {
 
   if (!profile?.clinic_id) return NextResponse.json({ error: "Sin clínica" }, { status: 400 })
 
-  const systemPrompt = await buildMarketingSystemPrompt(profile.clinic_id)
+  let systemPrompt: string
+  try {
+    systemPrompt = await buildMarketingSystemPrompt(profile.clinic_id)
+  } catch (e) {
+    console.error("[marketing/calendar] buildMarketingSystemPrompt failed:", e)
+    systemPrompt = "Sos el agente de marketing de una clínica estética. Respondé en español con JSON válido."
+  }
 
   const today = new Date().toLocaleDateString("es-CR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{
-      role: "user",
-      content: `Hoy es ${today}. Generá un plan de contenido para esta semana (7 días) basado en los pilares de contenido:
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{
+        role: "user",
+        content: `Hoy es ${today}. Generá un plan de contenido para esta semana (7 días) basado en los pilares de contenido:
 - Educativo 30%
 - Prueba social / testimonios 25%
 - Tips y lifestyle 25%
@@ -46,17 +53,15 @@ Para cada día, generá UN POST con este formato JSON exacto:
 }
 
 Respondé SOLO con un array JSON válido de 7 objetos, sin texto adicional.`,
-    }],
-  })
+      }],
+    })
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "[]"
-
-  try {
-    // Extract JSON array from response
+    const text = response.content[0].type === "text" ? response.content[0].text : "[]"
     const match = text.match(/\[[\s\S]*\]/)
     const posts = match ? JSON.parse(match[0]) : []
     return NextResponse.json({ posts })
-  } catch {
-    return NextResponse.json({ posts: [], rawText: text })
+  } catch (e) {
+    console.error("[marketing/calendar] Anthropic error:", e)
+    return NextResponse.json({ error: String(e), posts: [] }, { status: 500 })
   }
 }
