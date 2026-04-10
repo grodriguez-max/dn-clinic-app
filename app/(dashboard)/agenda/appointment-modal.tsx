@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { createAppointment, updateAppointment, cancelAppointment, createRecurringAppointments } from "./actions"
+import { getClinicalNotes, saveClinicalNotes } from "./clinical-notes-actions"
 import { getPatientActivePackages } from "@/app/(dashboard)/servicios/package-actions"
 import { registerAppointmentPayment, getAppointmentPayments } from "./payment-actions"
 import { format } from "date-fns"
@@ -110,6 +111,8 @@ export function AppointmentModal({
   const [payAmount, setPayAmount] = useState("")
   const [payType, setPayType] = useState<"deposit" | "full" | "remaining">("deposit")
   const [payMethod, setPayMethod] = useState<"cash" | "card" | "sinpe" | "transfer">("cash")
+  const [soap, setSoap] = useState({ subjective: "", objective: "", assessment: "", plan: "" })
+  const [soapTab, setSoapTab] = useState(false)
 
   // Populate form when modal opens
   useEffect(() => {
@@ -140,15 +143,20 @@ export function AppointmentModal({
     setError("")
   }, [open, isEdit])
 
-  // Load payments when editing
+  // Load payments and SOAP notes when editing
   useEffect(() => {
     if (isEdit && appointment?.id) {
       getAppointmentPayments(appointment.id).then(setPayments)
+      getClinicalNotes(appointment.id).then(data =>
+        setSoap(data ?? { subjective: "", objective: "", assessment: "", plan: "" })
+      )
     } else {
       setPayments([])
+      setSoap({ subjective: "", objective: "", assessment: "", plan: "" })
     }
     setShowPaymentForm(false)
     setPayAmount("")
+    setSoapTab(false)
   }, [open])
 
   // Detect active package when patient + service change
@@ -207,6 +215,10 @@ export function AppointmentModal({
           status,
         })
         if (res.error) { setError(res.error); return }
+        // Save SOAP notes (non-blocking on error)
+        if (soap.subjective || soap.objective || soap.assessment || soap.plan) {
+          await saveClinicalNotes(appointment.id, clinicId, soap)
+        }
       } else if (isRecurring) {
         const res = await createRecurringAppointments(clinicId, {
           patient_id: patientId,
@@ -521,6 +533,44 @@ export function AppointmentModal({
                       Registrar
                     </Button>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SOAP Notes — only in edit mode */}
+          {isEdit && (
+            <div className="space-y-2 pt-1 border-t border-border">
+              <button
+                type="button"
+                className="flex items-center justify-between w-full"
+                onClick={() => setSoapTab(v => !v)}
+              >
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notas clínicas (SOAP)</p>
+                <span className="text-xs text-primary">{soapTab ? "▲ Cerrar" : "▼ Expandir"}</span>
+              </button>
+              {soapTab && (
+                <div className="space-y-3">
+                  {(["subjective","objective","assessment","plan"] as const).map(field => (
+                    <div key={field} className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground font-medium">
+                        {field === "subjective" ? "S – Subjetivo (qué dice el paciente)" :
+                         field === "objective"  ? "O – Objetivo (observación del profesional)" :
+                         field === "assessment" ? "A – Evaluación / diagnóstico" :
+                                                  "P – Plan de tratamiento"}
+                      </Label>
+                      <Textarea
+                        value={soap[field]}
+                        onChange={e => setSoap(s => ({ ...s, [field]: e.target.value }))}
+                        rows={2}
+                        placeholder={field === "subjective" ? "Ej: Paciente refiere dolor en zona lumbar..." :
+                                     field === "objective"  ? "Ej: Se observa tensión muscular en L4-L5..." :
+                                     field === "assessment" ? "Ej: Lumbalgia mecánica..." :
+                                                              "Ej: 3 sesiones de terapia manual..."}
+                        className="text-xs"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

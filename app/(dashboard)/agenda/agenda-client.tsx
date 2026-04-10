@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { addDays, startOfWeek, isSameDay, format } from "date-fns"
 import { es } from "date-fns/locale"
-import { ChevronLeft, ChevronRight, Plus, Lock, Clock } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Lock, Clock, Printer, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { AppointmentModal, type ModalAppointment } from "./appointment-modal"
@@ -49,9 +49,10 @@ interface Appointment {
   professional_id: string
   service_id: string
   patient_id: string
+  checked_in_at?: string | null
   patients:      { name: string; phone?: string } | null
   professionals: { name: string } | null
-  services:      { name: string; duration_minutes: number } | null
+  services:      { name: string; duration_minutes: number; buffer_minutes?: number } | null
 }
 
 interface TimeBlock {
@@ -78,6 +79,11 @@ interface DragState {
   origStart: string
   durationMs: number
   offsetMin: number  // where within the card the pointer grabbed, in minutes
+}
+
+interface ResizeState {
+  apptId: string
+  startMin: number  // CR minutes from midnight for the appt start
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -113,6 +119,22 @@ function getMonday(d: Date): Date {
 function timeStrToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number)
   return h * 60 + (m || 0)
+}
+
+function getConflictIds(appts: Appointment[]): Set<string> {
+  const active = appts.filter(a => !["cancelled","no_show"].includes(a.status))
+  const ids = new Set<string>()
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i], b = active[j]
+      if (a.professional_id === b.professional_id &&
+          new Date(a.start_time) < new Date(b.end_time) &&
+          new Date(a.end_time)   > new Date(b.start_time)) {
+        ids.add(a.id); ids.add(b.id)
+      }
+    }
+  }
+  return ids
 }
 
 function computeColumns(appts: Appointment[]): ColumnedAppt[] {
@@ -184,6 +206,10 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     profId?: string   // only set in ProfDayView
   } | null>(null)
 
+  // Resize
+  const resizeRef   = useRef<ResizeState | null>(null)
+  const [resizePos, setResizePos] = useState<{ apptId: string; endMin: number } | null>(null)
+
   const gridRef   = useRef<HTMLDivElement>(null)
   const supabase  = createClient()
 
@@ -228,7 +254,7 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     const [apptRes, blockRes] = await Promise.all([
       supabase
         .from("appointments")
-        .select("id, start_time, end_time, status, notes, professional_id, service_id, patient_id, patients(name,phone), professionals(name), services(name,duration_minutes)")
+        .select("id, start_time, end_time, status, notes, professional_id, service_id, patient_id, checked_in_at, patients(name,phone), professionals(name), services(name,duration_minutes,buffer_minutes)")
         .eq("clinic_id", clinicId)
         .gte("start_time", `${fromStr}T06:00:00.000Z`)
         .lt("start_time",  `${toStr}T06:00:00.000Z`)
@@ -329,12 +355,25 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
   }
 
   function handleGridPointerMove(e: React.PointerEvent<HTMLDivElement>, days: Date[], profIds?: string[]) {
+    const gridEl = gridRef.current
+    if (!gridEl) return
+
+    // Resize takes priority
+    if (resizeRef.current) {
+      e.preventDefault()
+      dragMoved.current = true
+      const rect  = gridEl.getBoundingClientRect()
+      const relY  = e.clientY - rect.top + gridEl.scrollTop
+      const rawMin = relY / HOUR_HEIGHT * 60 + DAY_START * 60
+      const snapped = Math.round(rawMin / 15) * 15
+      const clamped = Math.max(resizeRef.current.startMin + 15, Math.min(DAY_END * 60, snapped))
+      setResizePos({ apptId: resizeRef.current.apptId, endMin: clamped })
+      return
+    }
+
     if (!dragRef.current) return
     e.preventDefault()
     dragMoved.current = true
-
-    const gridEl = gridRef.current
-    if (!gridEl) return
 
     const rect = gridEl.getBoundingClientRect()
     const gutterW = 56
@@ -359,6 +398,27 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
   }
 
   async function handleGridPointerUp() {
+    // Handle resize
+    if (resizeRef.current) {
+      const rr = resizeRef.current
+      resizeRef.current = null
+      if (!dragMoved.current || !resizePos || resizePos.apptId !== rr.apptId) {
+        setResizePos(null)
+        return
+      }
+      const appt = appointments.find(a => a.id === rr.apptId)
+      if (!appt) { setResizePos(null); return }
+      const crDate = format(toCRDate(appt.start_time), "yyyy-MM-dd")
+      const h = Math.floor(resizePos.endMin / 60)
+      const m = resizePos.endMin % 60
+      const newEnd = new Date(`${crDate}T${pad(h)}:${pad(m)}:00-06:00`).toISOString()
+      setAppointments(prev => prev.map(a => a.id === rr.apptId ? { ...a, end_time: newEnd } : a))
+      setResizePos(null)
+      const res = await updateAppointment(rr.apptId, { end_time: newEnd })
+      if (res.error) fetchAppts()
+      return
+    }
+
     if (!dragRef.current) return
     const dr = dragRef.current
     dragRef.current = null
@@ -390,17 +450,54 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     if (res.error) fetchAppts()  // revert on error
   }
 
+  // ─── Resize ───────────────────────────────────────────────────────
+  function startResize(appt: Appointment, e: React.PointerEvent) {
+    e.stopPropagation()
+    if (gridRef.current) gridRef.current.setPointerCapture(e.pointerId)
+    resizeRef.current = { apptId: appt.id, startMin: toCRMinutes(appt.start_time) }
+    dragMoved.current = false
+  }
+
+  // ─── Print day ────────────────────────────────────────────────────
+  function printDay() {
+    const dayAppts = filterByProf(getDayAppts(anchorDate)).filter(a => !["cancelled","no_show"].includes(a.status))
+    const dateStr  = format(anchorDate, "EEEE d 'de' MMMM yyyy", { locale: es })
+    const rows = dayAppts.map(a => `
+      <tr>
+        <td>${fmtTime(toCRMinutes(a.start_time))} – ${fmtTime(toCRMinutes(a.end_time))}</td>
+        <td>${a.patients?.name ?? "—"}</td>
+        <td>${a.services?.name ?? "—"}</td>
+        <td>${a.professionals?.name ?? "—"}</td>
+        <td>${a.status === "confirmed" ? "Confirmada" : a.status === "pending" ? "Pendiente" : "Completada"}</td>
+      </tr>`).join("")
+    const html = `<!DOCTYPE html><html><head><title>Agenda – ${dateStr}</title>
+      <style>body{font-family:sans-serif;padding:24px;color:#111}h1{font-size:18px;text-transform:capitalize;margin-bottom:4px}p{font-size:12px;color:#666;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;color:#6b7280}td{padding:8px 10px;border-bottom:1px solid #f3f4f6}tr:nth-child(even)td{background:#f9fafb}</style>
+      </head><body>
+      <h1>${dateStr}</h1><p>${dayAppts.length} cita${dayAppts.length !== 1 ? "s" : ""}</p>
+      <table><thead><tr><th>Horario</th><th>Paciente</th><th>Servicio</th><th>Profesional</th><th>Estado</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <script>window.onload=function(){window.print();}</script></body></html>`
+    const w = window.open("", "_blank")
+    if (w) { w.document.write(html); w.document.close() }
+  }
+
   // ─── Appointment card ─────────────────────────────────────────────
-  function ApptCard({ appt, top, height, left, width }: {
-    appt: Appointment; top: number; height: number; left: string; width: string
+  function ApptCard({ appt, top, height, left, width, isConflict }: {
+    appt: Appointment; top: number; height: number; left: string; width: string; isConflict?: boolean
   }) {
-    const isDragging = dragPos?.apptId === appt.id
-    const displayTop = isDragging && dragPos
+    const isDragging  = dragPos?.apptId === appt.id
+    const isResizing  = resizePos?.apptId === appt.id
+    const checkedIn   = !!appt.checked_in_at
+    const displayTop  = isDragging && dragPos
       ? (dragPos.startMin - DAY_START * 60) / 60 * HOUR_HEIGHT
       : top
 
     const c    = colorMap.get(appt.professional_id) ?? PROF_COLORS[0]
-    const dur  = toCRMinutes(appt.end_time) - toCRMinutes(appt.start_time)
+    const displayEndMin = isResizing && resizePos ? resizePos.endMin : toCRMinutes(appt.end_time)
+    const displayHeight = isResizing && resizePos
+      ? (resizePos.endMin - toCRMinutes(appt.start_time)) / 60 * HOUR_HEIGHT
+      : height
+    const dur  = displayEndMin - toCRMinutes(appt.start_time)
     const grey = appt.status === "cancelled" || appt.status === "no_show"
 
     return (
@@ -412,16 +509,18 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
           if (!dragMoved.current) openEdit(appt)
         }}
         className={cn(
-          "absolute border-l-[3px] rounded-md overflow-hidden select-none",
+          "absolute border-l-[3px] rounded-md overflow-hidden select-none group",
           "transition-shadow duration-150 hover:shadow-lg hover:z-30 hover:brightness-95",
           isDragging ? "z-50 ring-2 ring-primary/30 cursor-grabbing shadow-xl" : "cursor-grab",
+          isResizing && "z-50 ring-2 ring-blue-400/40",
+          isConflict && "ring-2 ring-red-400/60",
           c.bg, c.border, c.text,
           grey && "grayscale opacity-50",
           appt.status === "pending" && "opacity-80",
         )}
-        style={{ top: displayTop, height: Math.max(22, height - 2), left, width }}
+        style={{ top: displayTop, height: Math.max(22, displayHeight - 2), left, width }}
       >
-        <div className={cn("px-2 py-1 h-full", dur <= 30 ? "flex items-center gap-2" : "flex flex-col gap-0.5")}>
+        <div className={cn("px-2 py-1 h-full relative", dur <= 30 ? "flex items-center gap-2" : "flex flex-col gap-0.5")}>
           <p className={cn("font-semibold truncate leading-tight", dur <= 30 ? "text-[11px]" : "text-xs")}>
             {appt.patients?.name ?? "—"}
           </p>
@@ -435,10 +534,44 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
           )}
           {dur > 75 && (
             <p className="text-[10px] opacity-45 mt-auto">
-              {fmtTime(toCRMinutes(appt.start_time))} – {fmtTime(toCRMinutes(appt.end_time))}
+              {fmtTime(toCRMinutes(appt.start_time))} – {fmtTime(displayEndMin)}
             </p>
           )}
+
+          {/* Check-in indicator / button */}
+          {checkedIn ? (
+            <div className="absolute top-0.5 right-0.5 text-emerald-600" title="Check-in registrado">
+              <CheckCircle2 className="w-3 h-3" />
+            </div>
+          ) : (appt.status === "confirmed" || appt.status === "pending") && (
+            <button
+              type="button"
+              className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-emerald-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px] leading-none"
+              title="Registrar check-in"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={async (e) => {
+                e.stopPropagation()
+                const now = new Date().toISOString()
+                setAppointments(prev => prev.map(a => a.id === appt.id ? { ...a, checked_in_at: now } : a))
+                await updateAppointment(appt.id, { checked_in_at: now })
+              }}
+            >
+              ✓
+            </button>
+          )}
+
+          {/* Conflict badge */}
+          {isConflict && (
+            <div className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500" title="Conflicto de horario" />
+          )}
         </div>
+
+        {/* Resize handle */}
+        <div
+          className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize z-10 hover:bg-black/10 transition-colors"
+          onPointerDown={e => startResize(appt, e)}
+          onClick={e => e.stopPropagation()}
+        />
       </div>
     )
   }
@@ -509,10 +642,11 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
     days: Date[]
     profIds?: string[]
   }) {
-    const totalH  = HOURS.length * HOUR_HEIGHT
-    const nowTop  = (nowMin - DAY_START * 60) / 60 * HOUR_HEIGHT
-    const showNow = isToday && nowMin >= DAY_START * 60 && nowMin < DAY_END * 60
+    const totalH   = HOURS.length * HOUR_HEIGHT
+    const nowTop   = (nowMin - DAY_START * 60) / 60 * HOUR_HEIGHT
+    const showNow  = isToday && nowMin >= DAY_START * 60 && nowMin < DAY_END * 60
     const columned = computeColumns(appts)
+    const conflicts = getConflictIds(appts)
 
     return (
       <div
@@ -549,6 +683,23 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
           </div>
         )}
 
+        {/* Buffer strips */}
+        {columned.map(({ appt }) => {
+          const bufMin = (appt.services as { buffer_minutes?: number } | null)?.buffer_minutes ?? 0
+          if (!bufMin) return null
+          const eMin   = toCRMinutes(appt.end_time)
+          const bufTop = (eMin - DAY_START * 60) / 60 * HOUR_HEIGHT
+          const bufH   = bufMin / 60 * HOUR_HEIGHT
+          return (
+            <div
+              key={`buf-${appt.id}`}
+              className="absolute left-0 right-0 bg-amber-50/80 border-t border-amber-200/60 pointer-events-none z-5"
+              style={{ top: bufTop, height: Math.max(4, bufH) }}
+              title={`Buffer: ${bufMin} min`}
+            />
+          )
+        })}
+
         {/* Appointment blocks */}
         {columned.map(({ appt, colIndex, totalCols }) => {
           const sMin   = toCRMinutes(appt.start_time)
@@ -565,6 +716,7 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
               height={height}
               left={`${left}%`}
               width={`${colW - 0.5}%`}
+              isConflict={conflicts.has(appt.id)}
             />
           )
         })}
@@ -581,7 +733,7 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
         style={{ minHeight: totalH }}
         onPointerMove={e => handleGridPointerMove(e, days, profIds)}
         onPointerUp={handleGridPointerUp}
-        onPointerCancel={() => { dragRef.current = null; setDragPos(null) }}
+        onPointerCancel={() => { dragRef.current = null; setDragPos(null); resizeRef.current = null; setResizePos(null) }}
       >
         {/* Time gutter */}
         <div className="w-14 shrink-0 select-none relative">
@@ -901,6 +1053,16 @@ export function AgendaClient({ clinicId, professionals, services, patients, room
           >
             <Clock className="w-3.5 h-3.5 mr-1" />
             Espera
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={printDay}
+            title="Imprimir agenda del día"
+          >
+            <Printer className="w-3.5 h-3.5 mr-1" />
+            Imprimir
           </Button>
           <Button size="sm" className="h-8" onClick={() => openNew(anchorDate)}>
             <Plus className="w-4 h-4 mr-1.5" />

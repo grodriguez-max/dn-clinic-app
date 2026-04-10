@@ -157,7 +157,7 @@ export async function createAppointment(
 
 export async function updateAppointment(
   appointmentId: string,
-  updates: Partial<AppointmentInput & { status: string; cancellation_reason?: string }>
+  updates: Partial<AppointmentInput & { status: string; cancellation_reason?: string; checked_in_at?: string | null }>
 ) {
   const service = createServiceClient()
 
